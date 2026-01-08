@@ -1,14 +1,14 @@
 # app.py
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
 from PIL import Image
+
+from streamlit_autorefresh import st_autorefresh
 
 from src.infer import (
     list_frames,
@@ -21,11 +21,14 @@ from src.infer import (
     draw_overlay,
 )
 
-# ============================================================
-# Page
-# ============================================================
-st.set_page_config(page_title="PortHub Royale — Dispatcher Desk", layout="wide")
+from src.rules_engine import TASKS, eval_tasks, compute_alerts_df, AlertItem
+from src.turnaround_sequence import SequenceState, update_sequence, default_sequence
 
+
+# ----------------------------
+# Page / theme
+# ----------------------------
+st.set_page_config(page_title="PortHub Royale — Dispatcher Desk", layout="wide")
 st.markdown(
     """
 <style>
@@ -35,129 +38,110 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ============================================================
-# Dispatcher State (single source of truth for UI + ops logic)
-# ============================================================
+
+# ----------------------------
+# Event log structure
+# ----------------------------
 @dataclass
 class EventLogItem:
     t_sec: float
-    level: str   # "info" | "warning" | "task"
+    level: str
     message: str
 
 
-@dataclass
-class TaskHist:
-    status: str = "NOT_STARTED"  # NOT_STARTED | ACTIVE | INACTIVE | DONE
-    since: Optional[float] = None
-    last_seen: Optional[float] = None
+# ----------------------------
+# Init dispatcher state
+# ----------------------------
+def _init_dispatcher_state(run_id: str):
+    if "run_id" not in st.session_state:
+        st.session_state.run_id = run_id
 
+    if "asset_roles" not in st.session_state:
+        st.session_state.asset_roles = {}  # track_id -> role string
 
-@dataclass
-class AlertItem:
-    id: str
-    severity: str  # INFO | WARNING | CRITICAL
-    rule_id: str
-    message: str
-    first_seen: float
-    last_seen: float
-    status: str = "OPEN"  # OPEN | ACK | CLOSED
+    if "task_hist" not in st.session_state:
+        st.session_state.task_hist = {}  # task -> {"status","since","last_seen"}
 
+    if "task_counters" not in st.session_state:
+        st.session_state.task_counters = {}  # task -> {"on","off"}
 
-@dataclass
-class DispatcherState:
-    run_id: str = "run-0001"
+    if "alerts" not in st.session_state:
+        st.session_state.alerts = {}  # alert_id -> AlertItem
 
-    # playback
-    playback_running: bool = False
-    playback_idx: int = 0
-    t_sec: float = 0.0
+    if "event_log" not in st.session_state:
+        st.session_state.event_log: List[EventLogItem] = []
 
-    # human-in-the-loop: track_id -> role key
-    asset_roles: Dict[int, str] = field(default_factory=dict)
+    if "playback_running" not in st.session_state:
+        st.session_state.playback_running = False
+    if "playback_idx" not in st.session_state:
+        st.session_state.playback_idx = 0
 
-    # task evaluation
-    task_hist: Dict[str, TaskHist] = field(default_factory=dict)
+    if "tracker" not in st.session_state:
+        st.session_state.tracker = SimpleIoUTracker(iou_match=0.35, max_missed=10)
 
-    # stability counters per task key
-    # key -> {"on": int, "off": int, "last": Optional[bool]}
-    task_counters: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Sequence
+    if "seq_state" not in st.session_state:
+        st.session_state.seq_state = SequenceState()
+    if "seq_min_active_sec" not in st.session_state:
+        st.session_state.seq_min_active_sec = 5.0
 
-    # alerts store
-    alerts: Dict[str, AlertItem] = field(default_factory=dict)
-
-    # event log (newest first)
-    event_log: List[EventLogItem] = field(default_factory=list)
-
-
-def get_state() -> DispatcherState:
-    if "ph_state" not in st.session_state:
-        st.session_state.ph_state = DispatcherState()
-    return st.session_state.ph_state
-
-
-state = get_state()
-
-# tracker is "heavy" / object-y; keep it separately (works great for Streamlit)
-if "tracker" not in st.session_state:
-    st.session_state.tracker = SimpleIoUTracker(iou_match=0.35, max_missed=10)
+    # (2) Track stability memory (prevents flicker in asset tagging)
+    if "track_seen" not in st.session_state:
+        st.session_state.track_seen = {}  # track_id -> {"count": int, "last_t": float}
 
 
 def _log(level: str, t_sec: float, msg: str):
-    state.event_log.insert(0, EventLogItem(t_sec=float(t_sec), level=level, message=str(msg)))
-    state.event_log = state.event_log[:250]
+    st.session_state.event_log.insert(0, EventLogItem(t_sec=float(t_sec), level=level, message=str(msg)))
+    st.session_state.event_log = st.session_state.event_log[:250]
 
 
-# ============================================================
-# Helpers (ROI, stability)
-# ============================================================
-def _bbox_center(b: Tuple[float, float, float, float]):
-    x1, y1, x2, y2 = b
-    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-
-
-def _in_roi(bbox_xyxy: Tuple[float, float, float, float], roi: Tuple[int, int, int, int]) -> bool:
-    cx, cy = _bbox_center(bbox_xyxy)
-    x1, y1, x2, y2 = roi
-    return (x1 <= cx <= x2) and (y1 <= cy <= y2)
-
-
-def _stable_bool(key: str, cond: bool, on_n: int = 3, off_n: int = 3) -> Optional[bool]:
+def _reset_run_state(keep_asset_roles: bool = True):
     """
-    Debounce booleans so tasks don't flicker. Returns:
-      - True / False when stable
-      - None when still unstable (keep prior state)
+    (3) Reset all state that can cause 'sticky' alerts/ROI overlay across loops.
+    Keep asset roles by default (so human tagging survives resets).
     """
-    c = state.task_counters.setdefault(key, {"on": 0, "off": 0, "last": None})
-    if cond:
-        c["on"] += 1
-        c["off"] = 0
+    st.session_state.task_hist = {}
+    st.session_state.task_counters = {}
+    st.session_state.alerts = {}
+    st.session_state.seq_state = SequenceState()
+    st.session_state.tracker = SimpleIoUTracker(iou_match=0.35, max_missed=10)
+    st.session_state.track_seen = {}
+    if not keep_asset_roles:
+        st.session_state.asset_roles = {}
+    _log("info", st.session_state.t_sec if "t_sec" in st.session_state else 0.0, "Run state reset")
+
+
+def _alert_upsert_seq(alert_id: str, severity: str, rule_id: str, message: str, now_t: float):
+    a = st.session_state.alerts.get(alert_id)
+    if a is None:
+        st.session_state.alerts[alert_id] = AlertItem(
+            alert_id=alert_id,
+            severity=severity,
+            rule_id=rule_id,
+            message=message,
+            first_seen=now_t,
+            last_seen=now_t,
+            status="OPEN",
+        )
+        _log("warning" if severity in ("WARNING", "CRITICAL") else "info", now_t, f"{severity}: {message}")
     else:
-        c["off"] += 1
-        c["on"] = 0
-
-    if cond and c["on"] >= on_n:
-        if c["last"] is not True:
-            c["last"] = True
-        return True
-    if (not cond) and c["off"] >= off_n:
-        if c["last"] is not False:
-            c["last"] = False
-        return False
-
-    return None
+        a.last_seen = now_t
+        sev_rank = {"INFO": 0, "WARNING": 1, "CRITICAL": 2}
+        if sev_rank.get(severity, 0) > sev_rank.get(a.severity, 0):
+            a.severity = severity
+            a.message = message
 
 
-# ============================================================
-# Asset tagging (human-in-the-loop)
-# ============================================================
+# ----------------------------
+# Asset Tagging UI
+# ----------------------------
 ROLE_OPTIONS = {
     "UNASSIGNED": "Unassigned",
-    "GPU": "GPU (Ground Power Unit)",
+    "FUEL_TRUCK": "Fuel Truck",
+    "GPU_TRUCK": "GPU",
     "BELT_LOADER": "Belt / Baggage",
     "PUSHBACK_TUG": "Tug / Pushback",
     "STAIRS": "Stairs (proxy)",
-    "CATERING": "Catering (proxy)",
-    "FUEL": "Fuel Truck (proxy)",
     "OTHER": "Other",
 }
 
@@ -173,22 +157,41 @@ def render_asset_tagging(dets_df: pd.DataFrame):
         veh = dets_df.copy()
 
     if veh.empty:
-        st.info("No vehicles detected in current frame.")
+        st.info("No vehicle-class detections (truck/car/...).")
         return
 
-    veh = veh.sort_values(["track_id", "conf"], ascending=[True, False])
+    # (2) Stability filter to avoid flicker:
+    # - must be seen >=2 times
+    # - must be seen in last 2 seconds
+    def _stable(tid: int) -> bool:
+        rec = st.session_state.track_seen.get(tid)
+        if not rec:
+            return False
+        return int(rec.get("count", 0)) >= 2 and (float(st.session_state.t_sec) - float(rec.get("last_t", -999))) <= 2.0
+
+    if "track_id" in veh.columns:
+        veh = veh[veh["track_id"].apply(lambda x: _stable(int(x)))]
+        if veh.empty:
+            st.info("Vehicles detected, but not stable yet (needs 2 frames).")
+            return
+
+    if "conf" in veh.columns:
+        veh = veh.sort_values("conf", ascending=False)
+
+    if "track_id" in veh.columns and "conf" in veh.columns:
+        veh = veh.sort_values(["track_id", "conf"], ascending=[True, False]).drop_duplicates("track_id")
 
     for _, r in veh.iterrows():
-        tid = int(r["track_id"])
+        tid = int(r["track_id"]) if "track_id" in r else -1
+        cls_name = str(r.get("cls_name", "vehicle"))
         conf = float(r.get("conf", 0.0))
-        cls_name = str(r.get("cls_name", "obj"))
-
-        current = state.asset_roles.get(tid, "UNASSIGNED")
+        current = st.session_state.asset_roles.get(tid, "UNASSIGNED")
 
         c1, c2 = st.columns([1.1, 1.4], gap="small")
         with c1:
             st.markdown(f"**{cls_name}** `id={tid}`")
             st.caption(f"conf {conf:.2f}")
+
         with c2:
             new_role = st.selectbox(
                 label="",
@@ -198,290 +201,236 @@ def render_asset_tagging(dets_df: pd.DataFrame):
                 label_visibility="collapsed",
             )
             if new_role != current:
-                state.asset_roles[tid] = new_role
-                _log("info", state.t_sec, f"Asset tagged: id={tid} as {ROLE_OPTIONS.get(new_role, new_role)}")
+                st.session_state.asset_roles[tid] = new_role
+                _log("info", st.session_state.t_sec, f"Asset tagged: id={tid} as {ROLE_OPTIONS.get(new_role, new_role)}")
                 st.rerun()
 
 
-# ============================================================
-# Tasks (demo-friendly, ROI driven)
-# ============================================================
-TASKS = [
-    {"key": "fueling", "title": "Fueling", "role": "FUEL", "roi": "fuel"},
-    {"key": "gpu_connected", "title": "GPU connected", "role": "GPU", "roi": "gpu"},
-    {"key": "baggage_loading", "title": "Baggage loading", "role": "BELT_LOADER", "roi": "belt"},
-    {"key": "catering", "title": "Catering", "role": "CATERING", "roi": "catering"},
-    {"key": "pushback_ready", "title": "Pushback ready", "role": "PUSHBACK_TUG", "roi": "pushback"},
-    {"key": "safety_engine_clear", "title": "Safety: Engine zone clear", "role": "PERSON", "roi": "engine_clear"},
-]
+# ----------------------------
+# UI - Sidebar
+# ----------------------------
+st.title("PortHub Royale — Dispatcher Desk")
 
+run_id = "run-0001"
+_init_dispatcher_state(run_id)
 
-def eval_tasks(dets_df: pd.DataFrame, rois: Dict[str, Optional[Tuple[int, int, int, int]]], t_sec: float):
-    def any_role_in_roi(role: str, roi_key: str) -> bool:
-        roi = rois.get(roi_key)
-        if roi is None or dets_df is None or dets_df.empty:
-            return False
-
-        # People are not tagged; use cls_name
-        if role == "PERSON":
-            if "cls_name" not in dets_df.columns:
-                return False
-            people = dets_df[dets_df["cls_name"] == "person"]
-            for _, rr in people.iterrows():
-                if _in_roi(tuple(rr["bbox_xyxy"]), roi):
-                    return True
-            return False
-
-        tagged_ids = [tid for tid, r in state.asset_roles.items() if r == role]
-        if not tagged_ids:
-            return False
-
-        sub = dets_df[dets_df["track_id"].isin(tagged_ids)]
-        for _, rr in sub.iterrows():
-            if _in_roi(tuple(rr["bbox_xyxy"]), roi):
-                return True
-        return False
-
-    for t in TASKS:
-        key = t["key"]
-        title = t["title"]
-
-        # engine_clear is inverted condition (clear = no person in engine ROI)
-        if t["roi"] == "engine_clear":
-            engine_roi = rois.get("engine")
-            cond_clear = True
-            if engine_roi is not None and dets_df is not None and not dets_df.empty and "cls_name" in dets_df.columns:
-                people = dets_df[dets_df["cls_name"] == "person"]
-                for _, rr in people.iterrows():
-                    if _in_roi(tuple(rr["bbox_xyxy"]), engine_roi):
-                        cond_clear = False
-                        break
-            desired = _stable_bool(key, cond_clear, on_n=3, off_n=3)
-        else:
-            cond = any_role_in_roi(t["role"], t["roi"])
-            desired = _stable_bool(key, cond, on_n=3, off_n=4)
-
-        hist = state.task_hist.get(key)
-        if hist is None:
-            hist = TaskHist()
-            state.task_hist[key] = hist
-
-        # keep last_seen whenever raw condition is true (even if unstable)
-        if t["roi"] == "engine_clear":
-            # if NOT clear => people in engine => update last_seen for safety logic via desired below
-            pass
-        else:
-            if desired is True:
-                hist.last_seen = t_sec
-
-        if desired is None:
-            continue
-
-        if desired is True:
-            if hist.status in ["NOT_STARTED", "INACTIVE"]:
-                hist.status = "ACTIVE"
-                if hist.since is None:
-                    hist.since = t_sec
-                _log("task", t_sec, f"{title} → ACTIVE")
-            hist.last_seen = t_sec
-
-        elif desired is False:
-            if hist.status == "ACTIVE":
-                hist.status = "INACTIVE"
-                _log("task", t_sec, f"{title} → INACTIVE (lost)")
-
-
-# ============================================================
-# Alerts (simple, deduped)
-# ============================================================
-def _upsert_alert(alert_id: str, severity: str, rule_id: str, message: str, now_t: float):
-    a = state.alerts.get(alert_id)
-    if a is None:
-        state.alerts[alert_id] = AlertItem(
-            id=alert_id,
-            severity=severity,
-            rule_id=rule_id,
-            message=message,
-            first_seen=now_t,
-            last_seen=now_t,
-            status="OPEN",
-        )
-        _log("warning" if severity in ["WARNING", "CRITICAL"] else "info", now_t, f"{severity}: {message}")
-    else:
-        a.last_seen = now_t
-        # allow severity to escalate
-        sev_rank = {"INFO": 0, "WARNING": 1, "CRITICAL": 2}
-        if sev_rank.get(severity, 0) > sev_rank.get(a.severity, 0):
-            a.severity = severity
-            a.message = message
-
-
-def compute_alerts(now_t: float) -> pd.DataFrame:
-    # Safety critical: engine zone not clear
-    h = state.task_hist.get("safety_engine_clear", TaskHist())
-    if h.status == "INACTIVE":
-        _upsert_alert(
-            alert_id="engine_zone_not_clear",
-            severity="CRITICAL",
-            rule_id="safety_engine_clear",
-            message="Engine zone NOT clear (person detected in Engine ROI).",
-            now_t=now_t,
-        )
-
-    # Example deadline warning: GPU should be active by 120s
-    gpu = state.task_hist.get("gpu_connected", TaskHist())
-    if now_t >= 120 and gpu.status != "ACTIVE":
-        _upsert_alert(
-            alert_id="gpu_deadline_missed",
-            severity="WARNING",
-            rule_id="gpu_deadline",
-            message="GPU not connected by t=120s (deadline missed).",
-            now_t=now_t,
-        )
-
-    # Compact dataframe for UI
-    rows = []
-    for a in state.alerts.values():
-        if a.status != "OPEN":
-            continue
-        rows.append(
-            {
-                "t_first": a.first_seen,
-                "t_last": a.last_seen,
-                "severity": a.severity,
-                "rule": a.rule_id,
-                "message": a.message,
-                "id": a.id,
-            }
-        )
-    if not rows:
-        return pd.DataFrame(columns=["t_first", "t_last", "severity", "rule", "message", "id"])
-    df = pd.DataFrame(rows).sort_values(["severity", "t_last"], ascending=[False, False])
-    return df
-
-
-# ============================================================
-# Sidebar UI (Input / Playback / Detection / ROIs)
-# ============================================================
 with st.sidebar:
     st.header("Input")
     frames_folder = st.text_input("Frames folder", value="data/frames_1fps")
 
     st.header("Playback (Live view)")
-    playback_fps = st.slider("Playback FPS", 1, 10, 1)
+    playback_fps = st.slider("Playback FPS", 1, 12, 4)
     loop_playback = st.checkbox("Loop", value=True)
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("Play", use_container_width=True if False else False):  # (kept harmless)
-            state.playback_running = True
-    with c2:
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        if st.button("Play"):
+            st.session_state.playback_running = True
+    with b2:
         if st.button("Pause"):
-            state.playback_running = False
-    with c3:
+            st.session_state.playback_running = False
+    with b3:
         if st.button("Reset"):
-            state.playback_running = False
-            state.playback_idx = 0
-            state.t_sec = 0.0
-            _log("info", state.t_sec, "Playback reset")
+            st.session_state.playback_running = False
+            st.session_state.playback_idx = 0
+            _reset_run_state(keep_asset_roles=True)
+            st.rerun()
 
     st.header("Detection")
     demo_mode = st.checkbox("Demo Mode (no ML deps)", value=False)
+    run_detection_while_playing = st.checkbox("Run detection during Play", value=False)
     conf = st.slider("Confidence", 0.05, 0.95, 0.35, 0.01)
     iou = st.slider("IoU", 0.05, 0.95, 0.50, 0.01)
     weights = st.text_input("YOLO weights", value="yolov8n.pt")
 
+    show_rois = st.checkbox("Show ROIs overlay", value=False)
+
     st.header("ROIs (x1,y1,x2,y2)")
-    roi_gpu = st.text_input("gpu", value="260,250,620,520")
+    roi_nose = st.text_input("nose", value="260,250,620,520")
     roi_fuel = st.text_input("fuel", value="620,170,980,520")
-    roi_belt = st.text_input("belt", value="250,320,520,650")
-    roi_catering = st.text_input("catering", value="580,260,920,600")
-    roi_pushback = st.text_input("pushback", value="420,120,760,420")
+    roi_belly = st.text_input("belly", value="250,320,520,650")
+    roi_aircraft = st.text_input("aircraft", value="250,120,980,690")
     roi_engine = st.text_input("engine", value="330,300,620,560")
 
-# Build ROI dict
+
+# Parse ROIs
 rois: Dict[str, Optional[Tuple[int, int, int, int]]] = {
-    "gpu": parse_roi(roi_gpu),
+    "nose": parse_roi(roi_nose),
     "fuel": parse_roi(roi_fuel),
-    "belt": parse_roi(roi_belt),
-    "catering": parse_roi(roi_catering),
-    "pushback": parse_roi(roi_pushback),
+    "belly": parse_roi(roi_belly),
+    "aircraft": parse_roi(roi_aircraft),
     "engine": parse_roi(roi_engine),
 }
 
-# ============================================================
-# Frames / Playback
-# ============================================================
+
+# ----------------------------
+# Load frames
+# ----------------------------
 frames = list_frames(frames_folder)
 if not frames:
-    st.error(f"No frames found in: {frames_folder}")
+    st.error("No frames found. Check Frames folder path.")
     st.stop()
 
-# keep idx in bounds
-idx = max(0, min(int(state.playback_idx), len(frames) - 1))
-state.playback_idx = idx
+with st.sidebar:
+    st.caption(f"Frames found: **{len(frames)}**")
+    st.caption(f"Current idx: **{int(st.session_state.playback_idx)}**")
 
+idx = int(st.session_state.playback_idx)
+idx = max(0, min(idx, len(frames) - 1))
 frame_path = frames[idx]
 t_sec = float(idx)  # 1fps assumption
-state.t_sec = t_sec
+st.session_state.t_sec = t_sec
 
 img = Image.open(frame_path).convert("RGB")
 
-# ============================================================
-# Detection + Tracking
-# ============================================================
+
+# ----------------------------
+# Detection + tracking
+# ----------------------------
 model = None
-if not demo_mode:
+do_detection = (not st.session_state.playback_running) or bool(run_detection_while_playing)
+
+if not demo_mode and do_detection:
+
     @st.cache_resource
     def _cached_model(w: str):
         return load_model(w)
 
     model = _cached_model(weights)
 
-raw = demo_detections(img, t_sec) if demo_mode else yolo_detect(model, img, conf=conf, iou=iou)
-tracked = st.session_state.tracker.update(raw)
-dets_df = detections_df_from_tracked(tracked)
+if demo_mode:
+    raw = demo_detections(img, t_sec)
+elif do_detection:
+    raw = yolo_detect(model, img, conf=conf, iou=iou)
+else:
+    raw = []
 
-# ============================================================
-# Layout
-# ============================================================
-st.title("PortHub Royale — Dispatcher Desk")
+tracked = st.session_state.tracker.update(raw) if raw else []
+dets_df = detections_df_from_tracked(tracked) if tracked else pd.DataFrame()
 
+# (2) Update stability memory
+if dets_df is not None and not dets_df.empty and "track_id" in dets_df.columns:
+    for tid in dets_df["track_id"].dropna().astype(int).tolist():
+        rec = st.session_state.track_seen.get(tid, {"count": 0, "last_t": -1.0})
+        rec["count"] = int(rec.get("count", 0)) + 1
+        rec["last_t"] = float(t_sec)
+        st.session_state.track_seen[tid] = rec
+
+
+# ----------------------------
+# Evaluate tasks (Rule Engine)
+# ----------------------------
+eval_tasks(
+    dets_df=dets_df,
+    rois=rois,
+    t_sec=t_sec,
+    asset_roles=st.session_state.asset_roles,
+    task_hist=st.session_state.task_hist,
+    task_counters=st.session_state.task_counters,
+    log=_log,
+)
+
+# Sequence updates (already in your project)
+update_sequence(
+    now_t=t_sec,
+    task_hist=st.session_state.task_hist,
+    seq_state=st.session_state.seq_state,
+    alert=_alert_upsert_seq,
+    min_active_sec_for_done=float(st.session_state.seq_min_active_sec),
+)
+
+alerts_df = compute_alerts_df(
+    now_t=t_sec,
+    task_hist=st.session_state.task_hist,
+    alerts=st.session_state.alerts,
+    log=_log,
+)
+
+# Auto show ROIs only while there are active alerts (but alerts reset on loop start now)
+auto_show_rois = alerts_df is not None and not alerts_df.empty
+
+
+# ----------------------------
+# Layout (Frame + Console)
+# ----------------------------
 left, right = st.columns([3.6, 1.7], gap="large")
 
 with left:
     st.markdown("## Live Camera Feed (frames playback)")
-    title = f"Flight LX-123 (Gate A12) · Run {state.run_id} · t={t_sec:.0f}s · {frame_path.name}"
-    overlay = draw_overlay(img, dets_df, title=title, rois=rois, asset_roles=state.asset_roles)
+    title = f"Flight LX-123 (Gate A12) · Run {st.session_state.run_id} · t={t_sec:.0f}s · {frame_path.name}"
+
+    show_rois_effective = bool(show_rois) or bool(auto_show_rois)
+
+    overlay = draw_overlay(
+        img,
+        dets_df,
+        title=title,
+        rois=rois if show_rois_effective else {},
+        asset_roles=st.session_state.asset_roles,
+    )
     st.image(overlay, width="stretch")
 
 with right:
     st.markdown("## Dispatcher Console")
     st.markdown("**Turnaround**")
-    st.caption(f"Flight: **LX-123** (Gate A12) · Run: `{state.run_id}`")
+    st.caption(f"Flight: **LX-123** (Gate A12) · Run: `{st.session_state.run_id}`")
 
     st.markdown("### Asset tagging (human-in-the-loop)")
     st.caption("Tag detected vehicles once → tasks become realistic.")
     render_asset_tagging(dets_df)
 
-# Hook tasks evaluation
-eval_tasks(dets_df, rois, t_sec=t_sec)
 
-# ============================================================
+# ----------------------------
 # Tabs under frame
-# ============================================================
+# ----------------------------
 st.markdown("---")
 tabs = st.tabs(["Turnaround Operations", "Alerts", "Event log", "Timeline"])
 
 with tabs[0]:
+    seq = default_sequence()
+    sidx = int(st.session_state.seq_state.current_idx)
+
+    cL, cR = st.columns([2.2, 1], gap="small")
+    with cL:
+        if sidx < len(seq):
+            st.info(f"Next expected step: **{seq[sidx].title}**")
+        else:
+            st.success("Sequence completed ✅")
+    with cR:
+        st.caption("DONE sensitivity")
+        st.session_state.seq_min_active_sec = st.slider(
+            "min ACTIVE seconds to mark DONE",
+            1.0, 20.0,
+            value=float(st.session_state.seq_min_active_sec),
+            step=1.0,
+            label_visibility="collapsed",
+        )
+
+    st.markdown("#### Sequence")
+    for i, step in enumerate(seq):
+        started = st.session_state.seq_state.started_at.get(step.key)
+        done = st.session_state.seq_state.done_at.get(step.key)
+
+        if done is not None:
+            badge = "✅ DONE"
+        elif started is not None:
+            badge = "🟡 IN PROGRESS"
+        elif i == sidx:
+            badge = "➡️ NEXT"
+        else:
+            badge = "⏳ PENDING"
+        st.write(f"**{step.title}** — {badge}")
+
+    st.markdown("---")
+
     for t in TASKS:
         key = t["key"]
         title = t["title"]
-        hist = state.task_hist.get(key, TaskHist())
+        h = st.session_state.task_hist.get(key, {"status": "NOT_STARTED", "since": None, "last_seen": None})
 
-        status = hist.status
-        since = hist.since
-        last_seen = hist.last_seen
+        status = h.get("status", "NOT_STARTED")
+        since = h.get("since")
+        last_seen = h.get("last_seen")
 
         c1, c2 = st.columns([3, 1], gap="small")
         with c1:
@@ -493,28 +442,23 @@ with tabs[0]:
 
         with c2:
             pill = "ACTIVE" if status == "ACTIVE" else ("INACTIVE" if status == "INACTIVE" else "NOT_STARTED")
-            bg = "#1f7a3a" if pill == "ACTIVE" else ("#7a1f1f" if pill == "INACTIVE" else "#3b3f46")
+            color = "#1f7a3a" if pill == "ACTIVE" else ("#7a1f1f" if pill == "INACTIVE" else "#3b3f46")
             st.markdown(
-                f"""
-                <div style="display:flex;justify-content:flex-end;align-items:center;height:56px;">
-                  <span style="background:{bg};padding:8px 12px;border-radius:999px;font-weight:700;font-size:12px;">
-                    {pill}
-                  </span>
-                </div>
-                """,
+                f"<div style='text-align:right; padding-top:8px;'>"
+                f"<span style='background:{color};padding:8px 12px;border-radius:999px;font-weight:600;'>{pill}</span>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
 
 with tabs[1]:
-    alerts_df = compute_alerts(t_sec)
     if alerts_df is None or alerts_df.empty:
         st.success("No alerts in current window.")
     else:
         st.dataframe(alerts_df, width="stretch", height=280)
 
 with tabs[2]:
-    if state.event_log:
-        for e in state.event_log[:80]:
+    if st.session_state.event_log:
+        for e in st.session_state.event_log[:80]:
             badge = "⚠️" if e.level == "warning" else ("✅" if e.level == "task" else "ℹ️")
             st.write(f"{badge} **t={e.t_sec:.1f}s** — {e.message}")
     else:
@@ -523,28 +467,36 @@ with tabs[2]:
 with tabs[3]:
     rows = []
     for t in TASKS:
-        h = state.task_hist.get(t["key"], TaskHist())
+        h = st.session_state.task_hist.get(t["key"], {"status": "NOT_STARTED", "since": None, "last_seen": None})
         rows.append(
             {
                 "task": t["title"],
-                "status": h.status,
-                "since_sec": h.since,
-                "last_seen_sec": h.last_seen,
+                "status": h.get("status"),
+                "since_sec": h.get("since"),
+                "last_seen_sec": h.get("last_seen"),
             }
         )
     st.dataframe(pd.DataFrame(rows), width="stretch", height=260)
 
-# ============================================================
-# Playback loop
-# ============================================================
-if state.playback_running:
-    time.sleep(1.0 / max(1, int(playback_fps)))
+
+# ----------------------------
+# Playback tick (NO sleep/rerun)
+# ----------------------------
+if st.session_state.playback_running:
+    st_autorefresh(
+        interval=int(1000 / max(1, int(playback_fps))),
+        key="playback_tick",
+    )
+
     nxt = idx + 1
     if nxt >= len(frames):
         if loop_playback:
             nxt = 0
+            # (3) on loop wrap: reset run-state so alerts/ROIs/tracker don't stick
+            _reset_run_state(keep_asset_roles=True)
         else:
             nxt = len(frames) - 1
-            state.playback_running = False
-    state.playback_idx = nxt
-    st.rerun()
+            st.session_state.playback_running = False
+
+    st.session_state.playback_idx = nxt
+# ----------------------------
