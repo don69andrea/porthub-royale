@@ -1,0 +1,27 @@
+# Keep it simple. This is a prototype config.
+video:
+  sample_fps: 2  # set 1..5 for faster/slower
+yolo:
+  weights: "yolov8n.pt"
+  conf: 0.35
+  iou: 0.5
+
+zones:
+  # Default: whole frame if not set; you can define rectangles in UI later
+  # format: [x1, y1, x2, y2] in pixel coords of the processed frame
+  aircraft_roi: null
+  engine_roi: null
+
+rules:
+  # Example safety rule: too many people in engine zone (demo)
+  max_people_in_engine_roi: 1
+  # Example efficiency rule: GPU should appear early
+  gpu_deadline_seconds: 120
+  # Example ordering: chocks before GPU connection
+  require_chocks_before_gpu: true
+
+mapping:
+  # Map detected classes -> process steps (symbolic). This is adjustable.
+  # In real usage you would fine-tune a model for ground equipment.
+  gpu_classes: ["truck", "car"]          # proxy on COCO
+  person_classes: ["person"]

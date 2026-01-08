@@ -1,0 +1,239 @@
+# Auto generated from BPMN to TTL
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix bpmn: <http://www.omg.org/spec/BPMN/20100524/MODEL#> .
+@prefix ex:   <http://example.org/bpmn/> .
+
+ex:_8961e012_4cc2_4db1_954d_06576d7d7886 a bpmn:Participant ;
+    rdfs:label "Turnaround Process" ;
+    bpmn:processRef ex:_943132e2_dd85_4150_ab71_20a2171e6bbb ;
+    .
+
+ex:_943132e2_dd85_4150_ab71_20a2171e6bbb a bpmn:Process ;
+    rdfs:label "Turnaround Process - Process" ;
+    .
+
+ex:_95e2d88f_f82d_479e_a160_c4ffd94d6724 a bpmn:Lane ;
+    rdfs:label "Aircraft" ;
+    bpmn:flowNodeRef ex:_23a188a9_b973_4fcf_ae40_dfff0818b0bd .
+
+ex:_abd373d2_2e72_4b11_9fe1_57b5a0530c93 a bpmn:Lane ;
+    rdfs:label "Ramp Team" .
+
+ex:_d1a05d3f_f92e_4131_9d21_246934ee5e01 a bpmn:Lane ;
+    rdfs:label "Ramp Team (gelb) - führt aus" ;
+    bpmn:flowNodeRef ex:_62392d5f_ba30_4c00_a2d4_5cf7c9c87474 ;
+    bpmn:flowNodeRef ex:_7fafb21a_6af1_4969_8fcb_7a1f7e34af6e ;
+    bpmn:flowNodeRef ex:_ab4ee6a1_6c3f_46ca_a8de_bc763392d71b ;
+    bpmn:flowNodeRef ex:_a68f864e_d952_4919_be6b_194a7546ba4e ;
+    bpmn:flowNodeRef ex:_e72e607b_23d3_4d2e_8e9a_14dc2775333b ;
+    bpmn:flowNodeRef ex:_755f136f_69d0_428f_9fe2_915a3912df0b ;
+    bpmn:flowNodeRef ex:_ced2e8a0_caa9_494a_953e_bffab00291eb ;
+    bpmn:flowNodeRef ex:_f511a3fb_2a88_4ee1_bf77_e1120c317a17 ;
+    bpmn:flowNodeRef ex:_256250db_1dd5_4182_97af_9d2fe4515428 ;
+    bpmn:flowNodeRef ex:_65fc3de8_6e30_4ec9_81fd_1895864db4c4 ;
+    bpmn:flowNodeRef ex:_28e1c4bd_7224_41ec_a2fd_266ab84c434c ;
+    bpmn:flowNodeRef ex:_0340d1b8_aefc_41bd_bd5a_9b14e80cec86 ;
+    bpmn:flowNodeRef ex:_30ffdb49_69e2_4a44_8c1d_78f6f548a56c ;
+    bpmn:flowNodeRef ex:_36b242c6_0f9d_4355_a268_488cdc896097 ;
+    bpmn:flowNodeRef ex:_7430da22_f9df_4b25_b232_e557f9f1178c ;
+    bpmn:flowNodeRef ex:_f9a8af52_dc92_4f00_a615_522a5c9e7f2c ;
+    bpmn:flowNodeRef ex:_27df24f3_6c71_4d84_8500_f31f8eb66a6d .
+
+ex:_01d5a674_cb4e_4d94_880c_2773deabf03a a bpmn:Lane ;
+    rdfs:label "Supervisor (orange) - kotrolliert" ;
+    bpmn:flowNodeRef ex:_bf1688df_fcaa_4cde_b95a_18e4b80a435b ;
+    bpmn:flowNodeRef ex:_83bf9c08_f0c6_4774_8d75_b2e100fd33d8 ;
+    bpmn:flowNodeRef ex:_d7d08f2a_07f8_4572_a30e_3e3839a9202c .
+
+ex:_ab4ee6a1_6c3f_46ca_a8de_bc763392d71b a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Leave area" ;
+    bpmn:incoming ex:_89b8a794_1c2c_468a_9cf6_332ae0542343 ;
+    bpmn:outgoing ex:_9b1b72bf_91fc_4174_b4bb_fd345213a7af .
+
+ex:_a68f864e_d952_4919_be6b_194a7546ba4e a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Place rear chock" ;
+    bpmn:incoming ex:_d2d858ec_801b_4d69_b8ff_da2c17aeab0e ;
+    bpmn:outgoing ex:_89b8a794_1c2c_468a_9cf6_332ae0542343 .
+
+ex:_e72e607b_23d3_4d2e_8e9a_14dc2775333b a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Place front chock" ;
+    bpmn:incoming ex:_46565840_7063_4694_a9b5_bc7513d9c9ad ;
+    bpmn:outgoing ex:_d2d858ec_801b_4d69_b8ff_da2c17aeab0e .
+
+ex:_755f136f_69d0_428f_9fe2_915a3912df0b a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Walk to front wheel" ;
+    bpmn:incoming ex:_94a80a8e_57b6_40fa_94e4_e6fb74ed850a ;
+    bpmn:outgoing ex:_46565840_7063_4694_a9b5_bc7513d9c9ad .
+
+ex:_ced2e8a0_caa9_494a_953e_bffab00291eb a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Pick up chocks" ;
+    bpmn:incoming ex:_77cbcc14_b32d_47b7_b024_c9b96599201a ;
+    bpmn:outgoing ex:_94a80a8e_57b6_40fa_94e4_e6fb74ed850a .
+
+ex:_f511a3fb_2a88_4ee1_bf77_e1120c317a17 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Wait for aircraft to stop" ;
+    bpmn:incoming ex:_40251851_e59c_4aa1_8f20_f3e60ba47a0f ;
+    bpmn:outgoing ex:_77cbcc14_b32d_47b7_b024_c9b96599201a .
+
+ex:_0340d1b8_aefc_41bd_bd5a_9b14e80cec86 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Pull GPU cable to aircraft" ;
+    bpmn:incoming ex:_10736333_5ebf_4bda_be16_16f0a08124de ;
+    bpmn:incoming ex:_bb82ec8b_4a3d_4287_81bf_05b0d854226a ;
+    bpmn:outgoing ex:_719f6a2f_36dd_4478_a791_b6bc6ffd8c93 ;
+    bpmn:outgoing ex:_1c1a9021_b594_480c_b633_f035d194a7ff .
+
+ex:_30ffdb49_69e2_4a44_8c1d_78f6f548a56c a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Open aircraft power socket" ;
+    bpmn:incoming ex:_719f6a2f_36dd_4478_a791_b6bc6ffd8c93 ;
+    bpmn:incoming ex:_a9a0b83e_9319_4487_b78b_6f12cbdab44b ;
+    bpmn:outgoing ex:_68c8899f_b860_4845_9ba4_eb31fa636486 ;
+    bpmn:outgoing ex:_17c7afb1_364a_4acd_bf0c_9d42ed52a8d8 .
+
+ex:_7430da22_f9df_4b25_b232_e557f9f1178c a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Insert cable and latch" ;
+    bpmn:incoming ex:_68c8899f_b860_4845_9ba4_eb31fa636486 ;
+    bpmn:outgoing ex:_5088c8b9_17f1_4765_b196_5ad43215e459 .
+
+ex:_f9a8af52_dc92_4f00_a615_522a5c9e7f2c a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Crew leaves area" ;
+    bpmn:incoming ex:_5088c8b9_17f1_4765_b196_5ad43215e459 .
+
+ex:_bf1688df_fcaa_4cde_b95a_18e4b80a435b a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}task ;
+    rdfs:label "Supervisor verifies connection" ;
+    bpmn:outgoing ex:_fb9259de_604e_468a_bdf0_7a1aea59e32d .
+
+ex:_7fafb21a_6af1_4969_8fcb_7a1f7e34af6e a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}startEvent ;
+    rdfs:label "Aircraft arriving at gate" ;
+    bpmn:outgoing ex:_40251851_e59c_4aa1_8f20_f3e60ba47a0f .
+
+ex:_65fc3de8_6e30_4ec9_81fd_1895864db4c4 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}startEvent ;
+    rdfs:label "GPU connection start" ;
+    bpmn:outgoing ex:_10736333_5ebf_4bda_be16_16f0a08124de ;
+    bpmn:outgoing ex:_36602e60_3b88_48cc_b43a_b07515da3c31 .
+
+ex:_62392d5f_ba30_4c00_a2d4_5cf7c9c87474 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}endEvent ;
+    rdfs:label "Aircraft blocked and safe" ;
+    bpmn:incoming ex:_9b1b72bf_91fc_4174_b4bb_fd345213a7af .
+
+ex:_256250db_1dd5_4182_97af_9d2fe4515428 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}endEvent ;
+    rdfs:label "SLA breach / escalation" ;
+    bpmn:incoming ex:_c5ddf537_3fa9_4747_8404_7c9163af0dfd .
+
+ex:_27df24f3_6c71_4d84_8500_f31f8eb66a6d a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}endEvent ;
+    rdfs:label "SLA breach / escalation" ;
+    bpmn:incoming ex:_96341de1_813c_4888_a88c_48da6d791984 .
+
+ex:_83bf9c08_f0c6_4774_8d75_b2e100fd33d8 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}endEvent ;
+    rdfs:label "GPU connected and verified" ;
+    bpmn:incoming ex:_fb9259de_604e_468a_bdf0_7a1aea59e32d .
+
+ex:_d7d08f2a_07f8_4572_a30e_3e3839a9202c a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}endEvent ;
+    rdfs:label "SLA breach / escalation" ;
+    bpmn:incoming ex:_ce57fe9f_4957_41c6_bef5_f3adc525f4e1 .
+
+ex:_23a188a9_b973_4fcf_ae40_dfff0818b0bd a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}intermediateThrowEvent ;
+    rdfs:label "Aircraft Stopped" .
+
+ex:_da317413_9690_47b3_a4ea_4f12e3466046 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}boundaryEvent ;
+    bpmn:outgoing ex:_c5ddf537_3fa9_4747_8404_7c9163af0dfd .
+
+ex:_cd3226d7_0f15_4654_8bda_c80226ae6747 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}boundaryEvent ;
+    rdfs:label "PT30s" ;
+    bpmn:outgoing ex:_96341de1_813c_4888_a88c_48da6d791984 .
+
+ex:_13e59f1d_985a_43c0_a6bc_8cb7b951a9b3 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}boundaryEvent ;
+    rdfs:label "PT20s" ;
+    bpmn:outgoing ex:_ce57fe9f_4957_41c6_bef5_f3adc525f4e1 .
+
+ex:_28e1c4bd_7224_41ec_a2fd_266ab84c434c a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}parallelGateway ;
+    rdfs:label "GPU preparation (split)" ;
+    bpmn:incoming ex:_36602e60_3b88_48cc_b43a_b07515da3c31 ;
+    bpmn:outgoing ex:_bb82ec8b_4a3d_4287_81bf_05b0d854226a ;
+    bpmn:outgoing ex:_a9a0b83e_9319_4487_b78b_6f12cbdab44b .
+
+ex:_36b242c6_0f9d_4355_a268_488cdc896097 a bpmn:{http://www.omg.org/spec/BPMN/20100524/MODEL}parallelGateway ;
+    rdfs:label "GPU preparation done (join)" ;
+    bpmn:incoming ex:_1c1a9021_b594_480c_b633_f035d194a7ff ;
+    bpmn:incoming ex:_17c7afb1_364a_4acd_bf0c_9d42ed52a8d8 .
+
+ex:_40251851_e59c_4aa1_8f20_f3e60ba47a0f a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_7fafb21a_6af1_4969_8fcb_7a1f7e34af6e ;
+    bpmn:targetRef ex:_f511a3fb_2a88_4ee1_bf77_e1120c317a17 .
+
+ex:_77cbcc14_b32d_47b7_b024_c9b96599201a a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_f511a3fb_2a88_4ee1_bf77_e1120c317a17 ;
+    bpmn:targetRef ex:_ced2e8a0_caa9_494a_953e_bffab00291eb .
+
+ex:_94a80a8e_57b6_40fa_94e4_e6fb74ed850a a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_ced2e8a0_caa9_494a_953e_bffab00291eb ;
+    bpmn:targetRef ex:_755f136f_69d0_428f_9fe2_915a3912df0b .
+
+ex:_46565840_7063_4694_a9b5_bc7513d9c9ad a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_755f136f_69d0_428f_9fe2_915a3912df0b ;
+    bpmn:targetRef ex:_e72e607b_23d3_4d2e_8e9a_14dc2775333b .
+
+ex:_d2d858ec_801b_4d69_b8ff_da2c17aeab0e a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_e72e607b_23d3_4d2e_8e9a_14dc2775333b ;
+    bpmn:targetRef ex:_a68f864e_d952_4919_be6b_194a7546ba4e .
+
+ex:_89b8a794_1c2c_468a_9cf6_332ae0542343 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_a68f864e_d952_4919_be6b_194a7546ba4e ;
+    bpmn:targetRef ex:_ab4ee6a1_6c3f_46ca_a8de_bc763392d71b .
+
+ex:_9b1b72bf_91fc_4174_b4bb_fd345213a7af a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_ab4ee6a1_6c3f_46ca_a8de_bc763392d71b ;
+    bpmn:targetRef ex:_62392d5f_ba30_4c00_a2d4_5cf7c9c87474 .
+
+ex:_c5ddf537_3fa9_4747_8404_7c9163af0dfd a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_da317413_9690_47b3_a4ea_4f12e3466046 ;
+    bpmn:targetRef ex:_256250db_1dd5_4182_97af_9d2fe4515428 .
+
+ex:_10736333_5ebf_4bda_be16_16f0a08124de a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_65fc3de8_6e30_4ec9_81fd_1895864db4c4 ;
+    bpmn:targetRef ex:_0340d1b8_aefc_41bd_bd5a_9b14e80cec86 .
+
+ex:_719f6a2f_36dd_4478_a791_b6bc6ffd8c93 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_0340d1b8_aefc_41bd_bd5a_9b14e80cec86 ;
+    bpmn:targetRef ex:_30ffdb49_69e2_4a44_8c1d_78f6f548a56c .
+
+ex:_68c8899f_b860_4845_9ba4_eb31fa636486 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_30ffdb49_69e2_4a44_8c1d_78f6f548a56c ;
+    bpmn:targetRef ex:_7430da22_f9df_4b25_b232_e557f9f1178c .
+
+ex:_fb9259de_604e_468a_bdf0_7a1aea59e32d a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_bf1688df_fcaa_4cde_b95a_18e4b80a435b ;
+    bpmn:targetRef ex:_83bf9c08_f0c6_4774_8d75_b2e100fd33d8 .
+
+ex:_5088c8b9_17f1_4765_b196_5ad43215e459 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_7430da22_f9df_4b25_b232_e557f9f1178c ;
+    bpmn:targetRef ex:_f9a8af52_dc92_4f00_a615_522a5c9e7f2c .
+
+ex:_36602e60_3b88_48cc_b43a_b07515da3c31 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_65fc3de8_6e30_4ec9_81fd_1895864db4c4 ;
+    bpmn:targetRef ex:_28e1c4bd_7224_41ec_a2fd_266ab84c434c .
+
+ex:_bb82ec8b_4a3d_4287_81bf_05b0d854226a a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_28e1c4bd_7224_41ec_a2fd_266ab84c434c ;
+    bpmn:targetRef ex:_0340d1b8_aefc_41bd_bd5a_9b14e80cec86 .
+
+ex:_a9a0b83e_9319_4487_b78b_6f12cbdab44b a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_28e1c4bd_7224_41ec_a2fd_266ab84c434c ;
+    bpmn:targetRef ex:_30ffdb49_69e2_4a44_8c1d_78f6f548a56c .
+
+ex:_1c1a9021_b594_480c_b633_f035d194a7ff a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_0340d1b8_aefc_41bd_bd5a_9b14e80cec86 ;
+    bpmn:targetRef ex:_36b242c6_0f9d_4355_a268_488cdc896097 .
+
+ex:_17c7afb1_364a_4acd_bf0c_9d42ed52a8d8 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_30ffdb49_69e2_4a44_8c1d_78f6f548a56c ;
+    bpmn:targetRef ex:_36b242c6_0f9d_4355_a268_488cdc896097 .
+
+ex:_96341de1_813c_4888_a88c_48da6d791984 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_cd3226d7_0f15_4654_8bda_c80226ae6747 ;
+    bpmn:targetRef ex:_27df24f3_6c71_4d84_8500_f31f8eb66a6d .
+
+ex:_ce57fe9f_4957_41c6_bef5_f3adc525f4e1 a bpmn:SequenceFlow ;
+    bpmn:sourceRef ex:_13e59f1d_985a_43c0_a6bc_8cb7b951a9b3 ;
+    bpmn:targetRef ex:_d7d08f2a_07f8_4572_a30e_3e3839a9202c .
