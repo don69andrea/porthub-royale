@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.0.0">
+  <bpmn:process id="Process_ZRH_Turnaround" name="Turnaround Prozess ZRH" isExecutable="true">
+    
+    <bpmn:startEvent id="StartEvent_1" name="Flugzeug In-Block (AIBT)">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:task id="Task_ChocksOn" name="Chocks On">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="0" />
+          <camunda:property name="durationMax" value="1" />
+          <camunda:property name="role" value="Ramp Agent" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:task>
+    
+    <bpmn:task id="Task_GPU" name="GPU Connect">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMax" value="5" />
+          <camunda:property name="priority" value="high" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:task>
+    
+    <bpmn:task id="Task_PBB" name="PBB Connect">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="1" />
+          <camunda:property name="durationMax" value="2" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_To_Split</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:parallelGateway id="Gateway_Split" name="Start Parallelphasen">
+      <bpmn:incoming>Flow_To_Split</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stream_Pax</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stream_Wing</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stream_Tech</bpmn:outgoing>
+    </bpmn:parallelGateway>
+
+    <bpmn:task id="Task_Deboarding" name="Deboarding">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="10" />
+          <camunda:property name="durationMax" value="15" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Stream_Pax</bpmn:incoming>
+      <bpmn:outgoing>Flow_Pax_1</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Cleaning" name="Cleaning">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="10" />
+          <camunda:property name="durationMax" value="15" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Pax_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Pax_2</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Catering" name="Catering">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="10" />
+          <camunda:property name="durationMax" value="15" />
+          <camunda:property name="location" value="Right Side" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Pax_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Pax_3</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Boarding" name="Boarding">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="15" />
+          <camunda:property name="durationMax" value="20" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Pax_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_From_Pax</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Unload" name="Unload Baggage">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="15" />
+          <camunda:property name="durationMax" value="20" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Stream_Wing</bpmn:incoming>
+      <bpmn:outgoing>Flow_Wing_1</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Refuel" name="Refueling">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="15" />
+          <camunda:property name="durationMax" value="20" />
+          <camunda:property name="hazard" value="fire" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Wing_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Wing_2</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Load" name="Load Baggage">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="20" />
+          <camunda:property name="durationMax" value="30" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Wing_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_From_Wing</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_FOD" name="FOD Check">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMax" value="5" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Stream_Tech</bpmn:incoming>
+      <bpmn:outgoing>Flow_Tech_1</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Water" name="Water Service">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="5" />
+          <camunda:property name="durationMax" value="10" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Tech_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Tech_2</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Walkaround" name="Final Walkaround">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="5" />
+          <camunda:property name="durationMax" value="5" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Tech_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_From_Tech</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:parallelGateway id="Gateway_Join" name="Aircraft Ready (TOBT)">
+      <bpmn:incoming>Flow_From_Pax</bpmn:incoming>
+      <bpmn:incoming>Flow_From_Wing</bpmn:incoming>
+      <bpmn:incoming>Flow_From_Tech</bpmn:incoming>
+      <bpmn:outgoing>Flow_Outbound</bpmn:outgoing>
+    </bpmn:parallelGateway>
+
+    <bpmn:task id="Task_PBB_Disconnect" name="PBB Disconnect">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="1" />
+          <camunda:property name="durationMax" value="2" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Outbound</bpmn:incoming>
+      <bpmn:outgoing>Flow_Out_1</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_GSE_Remove" name="GSE Removal">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="1" />
+          <camunda:property name="durationMax" value="3" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Out_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Out_2</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_PushConnect" name="Pushback Tug Connect">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="1" />
+          <camunda:property name="durationMax" value="2" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Out_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Out_3</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_PushStart" name="Pushback &#38; Engine Start">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="durationMin" value="5" />
+          <camunda:property name="durationMax" value="10" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Out_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_To_End</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:endEvent id="EndEvent_1" name="Take Off (ATOT)">
+      <bpmn:incoming>Flow_To_End</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="Task_ChocksOn" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_ChocksOn" targetRef="Task_GPU" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_GPU" targetRef="Task_PBB" />
+    <bpmn:sequenceFlow id="Flow_To_Split" sourceRef="Task_PBB" targetRef="Gateway_Split" />
+    
+    <bpmn:sequenceFlow id="Flow_Stream_Pax" sourceRef="Gateway_Split" targetRef="Task_Deboarding" />
+    <bpmn:sequenceFlow id="Flow_Pax_1" sourceRef="Task_Deboarding" targetRef="Task_Cleaning" />
+    <bpmn:sequenceFlow id="Flow_Pax_2" sourceRef="Task_Cleaning" targetRef="Task_Catering" />
+    <bpmn:sequenceFlow id="Flow_Pax_3" sourceRef="Task_Catering" targetRef="Task_Boarding" />
+    <bpmn:sequenceFlow id="Flow_From_Pax" sourceRef="Task_Boarding" targetRef="Gateway_Join" />
+    
+    <bpmn:sequenceFlow id="Flow_Stream_Wing" sourceRef="Gateway_Split" targetRef="Task_Unload" />
+    <bpmn:sequenceFlow id="Flow_Wing_1" sourceRef="Task_Unload" targetRef="Task_Refuel" />
+    <bpmn:sequenceFlow id="Flow_Wing_2" sourceRef="Task_Refuel" targetRef="Task_Load" />
+    <bpmn:sequenceFlow id="Flow_From_Wing" sourceRef="Task_Load" targetRef="Gateway_Join" />
+    
+    <bpmn:sequenceFlow id="Flow_Stream_Tech" sourceRef="Gateway_Split" targetRef="Task_FOD" />
+    <bpmn:sequenceFlow id="Flow_Tech_1" sourceRef="Task_FOD" targetRef="Task_Water" />
+    <bpmn:sequenceFlow id="Flow_Tech_2" sourceRef="Task_Water" targetRef="Task_Walkaround" />
+    <bpmn:sequenceFlow id="Flow_From_Tech" sourceRef="Task_Walkaround" targetRef="Gateway_Join" />
+    
+    <bpmn:sequenceFlow id="Flow_Outbound" sourceRef="Gateway_Join" targetRef="Task_PBB_Disconnect" />
+    <bpmn:sequenceFlow id="Flow_Out_1" sourceRef="Task_PBB_Disconnect" targetRef="Task_GSE_Remove" />
+    <bpmn:sequenceFlow id="Flow_Out_2" sourceRef="Task_GSE_Remove" targetRef="Task_PushConnect" />
+    <bpmn:sequenceFlow id="Flow_Out_3" sourceRef="Task_PushConnect" targetRef="Task_PushStart" />
+    <bpmn:sequenceFlow id="Flow_To_End" sourceRef="Task_PushStart" targetRef="EndEvent_1" />
+
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_ZRH_Turnaround"></bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

@@ -1,0 +1,114 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix zrh: <http://airport-zuerich.ch/ontology/turnaround#> .
+
+# --- Klassen Definitionen ---
+zrh:Task a rdfs:Class .
+zrh:Milestone a rdfs:Class .
+zrh:Stream a rdfs:Class .
+
+# --- Stream Instanzen ---
+zrh:PassengerStream a zrh:Stream .
+zrh:BelowWingStream a zrh:Stream .
+zrh:TechnicalStream a zrh:Stream .
+
+# --- Prozess Definition (Phase I) ---
+
+zrh:Task_ChocksOn a zrh:Task ;
+    rdfs:label "Chocks On" ;
+    zrh:performedBy "Ramp Agent" ;
+    zrh:durationMin "0"^^xsd:integer ;
+    zrh:durationMax "1"^^xsd:integer ;
+    zrh:hasNextStep zrh:Task_GPU .
+
+zrh:Task_GPU a zrh:Task ;
+    rdfs:label "GPU Connect" ;
+    zrh:durationMax "5"^^xsd:integer ;
+    zrh:priority "High" ;
+    zrh:hasNextStep zrh:Task_PBB .
+
+zrh:Task_PBB a zrh:Task ;
+    rdfs:label "PBB Connect" ;
+    zrh:durationMin "1"^^xsd:integer ;
+    zrh:hasNextStep zrh:Split_Parallel .
+
+# --- Parallele Streams ---
+
+# 1. Passagier Stream
+zrh:Task_Deboarding a zrh:Task ;
+    rdfs:label "Deboarding" ;
+    zrh:partOfStream zrh:PassengerStream ;
+    zrh:durationMin "10"^^xsd:integer ;
+    zrh:hasNextStep zrh:Task_Cleaning .
+
+zrh:Task_Cleaning a zrh:Task ;
+    rdfs:label "Cleaning" ;
+    zrh:partOfStream zrh:PassengerStream ;
+    zrh:durationMin "10"^^xsd:integer ;
+    zrh:hasNextStep zrh:Task_Catering .
+
+zrh:Task_Catering a zrh:Task ;
+    rdfs:label "Catering" ;
+    zrh:partOfStream zrh:PassengerStream ;
+    zrh:location "Right Side" ;
+    zrh:hasNextStep zrh:Task_Boarding .
+
+zrh:Task_Boarding a zrh:Task ;
+    rdfs:label "Boarding" ;
+    zrh:partOfStream zrh:PassengerStream ;
+    zrh:durationMin "15"^^xsd:integer ;
+    zrh:hasNextStep zrh:Milestone_TOBT .
+
+# 2. Below Wing Stream
+zrh:Task_Unload a zrh:Task ;
+    rdfs:label "Unload Baggage" ;
+    zrh:partOfStream zrh:BelowWingStream ;
+    zrh:durationMin "15"^^xsd:integer ;
+    zrh:hasNextStep zrh:Task_Refuel .
+
+zrh:Task_Refuel a zrh:Task ;
+    rdfs:label "Refueling" ;
+    zrh:partOfStream zrh:BelowWingStream ;
+    zrh:hasHazard "Fire Risk" ;
+    zrh:hasNextStep zrh:Task_Load .
+
+zrh:Task_Load a zrh:Task ;
+    rdfs:label "Load Baggage" ;
+    zrh:partOfStream zrh:BelowWingStream ;
+    zrh:durationMax "30"^^xsd:integer ;
+    zrh:hasNextStep zrh:Milestone_TOBT .
+
+# 3. Technical Stream
+zrh:Task_FOD a zrh:Task ;
+    rdfs:label "FOD Check" ;
+    zrh:partOfStream zrh:TechnicalStream ;
+    zrh:hasNextStep zrh:Task_Water .
+
+zrh:Task_Water a zrh:Task ;
+    rdfs:label "Water Service" ;
+    zrh:partOfStream zrh:TechnicalStream ;
+    zrh:hasNextStep zrh:Task_Walkaround .
+
+zrh:Task_Walkaround a zrh:Task ;
+    rdfs:label "Final Walkaround" ;
+    zrh:partOfStream zrh:TechnicalStream ;
+    zrh:hasNextStep zrh:Milestone_TOBT .
+
+# --- Join & Outbound ---
+
+zrh:Milestone_TOBT a zrh:Milestone ;
+    rdfs:label "Aircraft Ready (TOBT)" ;
+    zrh:hasNextStep zrh:Task_PBB_Disconnect .
+
+zrh:Task_PBB_Disconnect a zrh:Task ;
+    rdfs:label "PBB Disconnect" ;
+    zrh:hasNextStep zrh:Task_GSE_Remove .
+
+zrh:Task_GSE_Remove a zrh:Task ;
+    rdfs:label "GSE Removal" ;
+    zrh:hasNextStep zrh:Task_PushStart .
+
+zrh:Task_PushStart a zrh:Task ;
+    rdfs:label "Pushback & Engine Start" ;
+    zrh:durationMin "5"^^xsd:integer .

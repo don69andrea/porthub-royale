@@ -1,0 +1,155 @@
+{
+  "processName": "Turnaround Prozess ZRH",
+  "version": "1.0",
+  "tasks": [
+    {
+      "id": "Task_ChocksOn",
+      "name": "Chocks On",
+      "role": "Ramp Agent",
+      "durationMin": 0,
+      "durationMax": 1,
+      "dependencies": ["StartEvent_1"],
+      "description": "Unmittelbar nach Stillstand (AIBT)."
+    },
+    {
+      "id": "Task_GPU",
+      "name": "GPU Connect",
+      "role": "Ramp Agent",
+      "durationMin": 1,
+      "durationMax": 5,
+      "dependencies": ["Task_ChocksOn"],
+      "priority": "high",
+      "description": "Muss vor APU Shutdown passieren."
+    },
+    {
+      "id": "Task_PBB",
+      "name": "PBB Connect",
+      "role": "Airport",
+      "durationMin": 1,
+      "durationMax": 2,
+      "dependencies": ["Task_GPU"],
+      "type": "Gate"
+    },
+    {
+      "id": "Task_Deboarding",
+      "name": "Deboarding",
+      "role": "Pax/Crew",
+      "durationMin": 10,
+      "durationMax": 15,
+      "dependencies": ["Task_PBB"],
+      "stream": "Passenger"
+    },
+    {
+      "id": "Task_Cleaning",
+      "name": "Cleaning",
+      "role": "Service",
+      "durationMin": 10,
+      "durationMax": 15,
+      "dependencies": ["Task_Deboarding"],
+      "stream": "Passenger"
+    },
+    {
+      "id": "Task_Catering",
+      "name": "Catering",
+      "role": "Service",
+      "durationMin": 10,
+      "durationMax": 15,
+      "dependencies": ["Task_Cleaning"],
+      "stream": "Passenger",
+      "location": "Right Side"
+    },
+    {
+      "id": "Task_Boarding",
+      "name": "Boarding",
+      "role": "Pax",
+      "durationMin": 15,
+      "durationMax": 20,
+      "dependencies": ["Task_Catering"],
+      "stream": "Passenger"
+    },
+    {
+      "id": "Task_Unload",
+      "name": "Unload Baggage",
+      "role": "Ramp Agent",
+      "durationMin": 15,
+      "durationMax": 20,
+      "dependencies": ["Task_PBB"],
+      "stream": "BelowWing"
+    },
+    {
+      "id": "Task_Refuel",
+      "name": "Refueling",
+      "role": "Fueler",
+      "durationMin": 15,
+      "durationMax": 20,
+      "dependencies": ["Task_Unload"],
+      "stream": "BelowWing",
+      "hazard": "Fire Risk"
+    },
+    {
+      "id": "Task_Load",
+      "name": "Load Baggage",
+      "role": "Ramp Agent",
+      "durationMin": 20,
+      "durationMax": 30,
+      "dependencies": ["Task_Refuel"],
+      "stream": "BelowWing"
+    },
+    {
+      "id": "Task_FOD",
+      "name": "FOD Check",
+      "role": "Ramp Agent",
+      "durationMax": 5,
+      "dependencies": ["Task_PBB"],
+      "stream": "Technical"
+    },
+    {
+      "id": "Task_Water",
+      "name": "Water Service",
+      "role": "Service",
+      "durationMin": 5,
+      "durationMax": 10,
+      "dependencies": ["Task_FOD"],
+      "stream": "Technical"
+    },
+    {
+      "id": "Task_Walkaround",
+      "name": "Final Walkaround",
+      "role": "Ramp Agent",
+      "durationMin": 5,
+      "durationMax": 5,
+      "dependencies": ["Task_Water"],
+      "stream": "Technical"
+    },
+    {
+      "id": "Gateway_Join",
+      "name": "Aircraft Ready (TOBT)",
+      "type": "Milestone",
+      "dependencies": ["Task_Boarding", "Task_Load", "Task_Walkaround"]
+    },
+    {
+      "id": "Task_PBB_Disconnect",
+      "name": "PBB Disconnect",
+      "role": "Airport",
+      "durationMin": 1,
+      "durationMax": 2,
+      "dependencies": ["Gateway_Join"]
+    },
+    {
+      "id": "Task_GSE_Remove",
+      "name": "GSE Removal",
+      "role": "All",
+      "durationMin": 1,
+      "durationMax": 3,
+      "dependencies": ["Task_PBB_Disconnect"]
+    },
+    {
+      "id": "Task_PushStart",
+      "name": "Pushback & Engine Start",
+      "role": "Pilot/Tug",
+      "durationMin": 5,
+      "durationMax": 10,
+      "dependencies": ["Task_GSE_Remove"]
+    }
+  ]
+}
