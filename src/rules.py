@@ -30,8 +30,7 @@ def evaluate_rules(
     person_classes: List[str],
     gpu_classes: List[str],
     max_people_in_engine_roi: int = 1,
-    gpu_deadline_seconds: int = 120,
-    require_chocks_before_gpu: bool = True,
+    engine_violation_cooldown: float = 3.0,
 ) -> List[Alert]:
     """
     `frames_det` is a list of dicts:
@@ -46,75 +45,74 @@ def evaluate_rules(
     chocks_inferred = False
     person_in_aircraft_streak = 0
 
-    for f in frames_det:
-        t = float(f["t_sec"])
-        det = f["det"]
-        cls_names: Dict[int, str] = f["cls_names"]
+    last_engine_alert_t: Optional[float] = None
 
-        if det.size == 0:
+    for f in frames_det:
+        t_sec = float(f.get("t_sec", 0.0))
+        det = f.get("det", None)
+        cls_names: Dict[int, str] = f.get("cls_names", {})
+
+        if det is None or len(det) == 0:
+            # decay streak
+            person_in_aircraft_streak = max(0, person_in_aircraft_streak - 1)
+            continue
+
+        det = np.asarray(det)
+        if det.ndim != 2 or det.shape[1] < 6:
             continue
 
         xyxy = det[:, 0:4]
         cls_ids = det[:, 5].astype(int)
+        cls = np.array([cls_names.get(int(i), str(int(i))) for i in cls_ids])
 
-        names = np.array([cls_names.get(int(i), str(int(i))) for i in cls_ids], dtype=object)
+        # GPU seen
+        if gpu_first_t is None and any(c in gpu_classes for c in cls.tolist()):
+            gpu_first_t = t_sec
+            alerts.append(Alert(t_sec=t_sec, severity="info", rule_id="gpu_seen", message="GPU detected (first sighting)."))
 
-        # --- rule: people in engine ROI (safety)
-        if engine_roi is not None:
-            is_person = np.isin(names, person_classes)
-            in_engine = _in_roi(xyxy[is_person], engine_roi) if np.any(is_person) else np.array([], dtype=bool)
-            n_people_engine = int(in_engine.sum()) if in_engine.size else 0
-            if n_people_engine > max_people_in_engine_roi:
-                alerts.append(Alert(
-                    t_sec=t,
-                    severity="critical",
-                    rule_id="safety.people_in_engine_zone",
-                    message=f"{n_people_engine} persons in engine zone (limit {max_people_in_engine_roi})",
-                ))
+        # People logic
+        is_person = np.isin(cls, np.array(person_classes))
+        if is_person.any():
+            persons_xyxy = xyxy[is_person]
 
-        # --- infer "chocks placed" (demo heuristic)
-        if aircraft_roi is not None:
-            is_person = np.isin(names, person_classes)
-            if np.any(is_person):
-                in_aircraft = _in_roi(xyxy[is_person], aircraft_roi)
+            # Engine ROI safety
+            if engine_roi is not None:
+                in_engine = _in_roi(persons_xyxy, engine_roi)
+                n_engine = int(in_engine.sum())
+                if n_engine > max_people_in_engine_roi:
+                    # cooldown
+                    if last_engine_alert_t is None or (t_sec - last_engine_alert_t) >= float(engine_violation_cooldown):
+                        last_engine_alert_t = t_sec
+                        alerts.append(
+                            Alert(
+                                t_sec=t_sec,
+                                severity="critical",
+                                rule_id="engine_zone_people",
+                                message=f"Too many people in engine zone ({n_engine}).",
+                            )
+                        )
+
+            # Aircraft ROI -> infer chocks (placeholder)
+            if aircraft_roi is not None:
+                in_aircraft = _in_roi(persons_xyxy, aircraft_roi)
                 if bool(in_aircraft.any()):
                     person_in_aircraft_streak += 1
                 else:
-                    person_in_aircraft_streak = 0
-            else:
-                person_in_aircraft_streak = 0
+                    person_in_aircraft_streak = max(0, person_in_aircraft_streak - 1)
 
-            # if person is near aircraft for ~3 sampled frames -> infer chocks
-            if person_in_aircraft_streak >= 3:
-                chocks_inferred = True
+                if (not chocks_inferred) and person_in_aircraft_streak >= 8:
+                    chocks_inferred = True
+                    alerts.append(
+                        Alert(
+                            t_sec=t_sec,
+                            severity="warning",
+                            rule_id="chocks_inferred",
+                            message="Chocks inferred (person stayed near aircraft for a while).",
+                        )
+                    )
 
-        # --- rule: GPU appears within deadline (efficiency)
-        is_gpu = np.isin(names, gpu_classes)
-        if np.any(is_gpu):
-            if gpu_first_t is None:
-                gpu_first_t = t
-
+    # If GPU never observed
     if gpu_first_t is None:
-        alerts.append(Alert(
-            t_sec=float(gpu_deadline_seconds),
-            severity="warning",
-            rule_id="eff.gpu_missing",
-            message=f"GPU not detected within first {gpu_deadline_seconds}s (proxy classes: {gpu_classes})",
-        ))
-    elif gpu_first_t > gpu_deadline_seconds:
-        alerts.append(Alert(
-            t_sec=float(gpu_first_t),
-            severity="warning",
-            rule_id="eff.gpu_late",
-            message=f"GPU first detected at {gpu_first_t:.1f}s (deadline {gpu_deadline_seconds}s)",
-        ))
-
-    if require_chocks_before_gpu and (gpu_first_t is not None) and not chocks_inferred:
-        alerts.append(Alert(
-            t_sec=float(gpu_first_t),
-            severity="warning",
-            rule_id="order.chocks_before_gpu",
-            message="GPU detected but chocks not inferred before GPU (demo heuristic)",
-        ))
+        alerts.append(Alert(t_sec=0.0, severity="warning", rule_id="gpu_missing", message="GPU not observed in the sequence."))
 
     return alerts

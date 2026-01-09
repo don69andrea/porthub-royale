@@ -16,28 +16,18 @@ class TaskHist:
     last_seen: Optional[float] = None
 
 @dataclass
-class AlertItem:
-    id: str
-    t_sec: float
-    severity: str   # info|warning|critical
-    rule_id: str
-    message: str
-    status: str = "OPEN"          # OPEN | ACK | CLOSED
-    last_seen_sec: float = 0.0
-
-@dataclass
 class DispatcherState:
-    # human-in-the-loop tagging: track_id -> role key
+    run_id: str = "run-0001"
+
+    # tagging
     asset_roles: Dict[int, str] = field(default_factory=dict)
 
-    # task state: task_key -> TaskHist
-    task_hist: Dict[str, TaskHist] = field(default_factory=dict)
-
-    # stability counters: key -> {"on":int,"off":int,"last":bool}
+    # per-task state/history
+    task_hist: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     task_counters: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
-    # alerts: alert_id -> AlertItem
-    alerts: Dict[str, AlertItem] = field(default_factory=dict)
+    # alerts store (dedupe)
+    alerts: Dict[str, Any] = field(default_factory=dict)
 
     # event log
     event_log: List[EventLogItem] = field(default_factory=list)

@@ -28,101 +28,71 @@ def _classes_present_in_frame(
     roi: Optional[Tuple[int, int, int, int]] = None,
 ) -> bool:
     """
-    det rows: [x1,y1,x2,y2,conf,cls,track_id]
+    det rows: [x1,y1,x2,y2,conf,cls,track]
     """
     if det is None or len(det) == 0:
         return False
+    det = np.asarray(det)
+    if det.ndim != 2 or det.shape[1] < 6:
+        return False
 
     for row in det:
-        x1, y1, x2, y2, conf, cls_id, tid = row.tolist()
-        name = cls_names.get(int(cls_id), str(int(cls_id))).lower()
-        if name in class_set:
-            if roi is None:
-                return True
-            if _center_in_roi(x1, y1, x2, y2, roi):
-                return True
+        x1, y1, x2, y2 = row[0:4]
+        cls_id = int(row[5])
+        name = cls_names.get(cls_id, str(cls_id))
+        if name not in class_set:
+            continue
+        if roi is not None:
+            if not _center_in_roi(float(x1), float(y1), float(x2), float(y2), roi):
+                continue
+        return True
     return False
 
 
-def infer_task_states(
-    frames_det: List[Dict[str, Any]],
+def update_task_state(
+    state: TaskState,
+    present: bool,
+    t_sec: float,
     *,
-    aircraft_roi: Optional[Tuple[int, int, int, int]] = None,
-    engine_roi: Optional[Tuple[int, int, int, int]] = None,
-    mapping: Optional[Dict[str, List[str]]] = None,
-    min_active_seconds: int = 15,
-    done_grace_seconds: int = 10,
-) -> List[TaskState]:
+    done_after_sec: float = 5.0,
+) -> TaskState:
+    if present:
+        if state.status == "NOT_STARTED":
+            state.status = "ACTIVE"
+            state.since_sec = float(t_sec)
+        state.last_seen_sec = float(t_sec)
+    else:
+        # if was active long enough, consider done
+        if state.status == "ACTIVE" and state.since_sec is not None:
+            if (float(t_sec) - float(state.since_sec)) >= float(done_after_sec):
+                state.status = "DONE"
+        state.last_seen_sec = float(t_sec)
+    return state
+
+
+def infer_tasks_from_frames(
+    frames_det: List[dict],
+    *,
+    rois: Dict[str, Optional[Tuple[int, int, int, int]]],
+    cls_sets: Dict[str, Set[str]],
+    done_after_sec: float = 5.0,
+) -> Dict[str, TaskState]:
     """
-    Converts detections into human-readable turnaround task states.
-    Works best with 1fps input (your case).
+    frames_det entries:
+      {t_sec, det (Nx7), cls_names}
     """
-    if mapping is None:
-        mapping = {}
-
-    def _set(key: str, defaults: List[str]) -> Set[str]:
-        vals = mapping.get(key, defaults)
-        return {v.lower().strip() for v in vals}
-
-    # You can tune these names depending on what YOLO actually outputs.
-    person_classes = _set("person_classes", ["person"])
-    gpu_classes = _set("gpu_classes", ["gpu", "groundpower", "truck", "car"])
-    fuel_classes = _set("fuel_classes", ["fueltruck", "truck"])
-    stairs_classes = _set("stairs_classes", ["stair", "stairs"])
-    belt_classes = _set("belt_classes", ["beltloader", "belt loader"])
-    baggage_cart_classes = _set("baggage_cart_classes", ["baggagecart", "baggage cart", "cart", "trolley", "trolly"])
-    pushback_classes = _set("pushback_classes", ["pushback", "tug", "tractor"])
-
-    # Define tasks as "presence signals"
-    task_defs = [
-        ("Safety: Engine zone clear", person_classes, engine_roi, "person in engine zone"),
-        ("GPU connected", gpu_classes, aircraft_roi, "gpu near aircraft"),
-        ("Fueling", fuel_classes, aircraft_roi, "fuel truck near aircraft"),
-        ("Stairs positioned", stairs_classes, aircraft_roi, "stairs near aircraft"),
-        ("Baggage unloading/loading", baggage_cart_classes | belt_classes, aircraft_roi, "belt/cart near aircraft"),
-        ("Pushback", pushback_classes, aircraft_roi, "tug/pushback near aircraft"),
-    ]
-
-    # Track when each task signal is seen
-    first_seen: Dict[str, Optional[float]] = {t[0]: None for t in task_defs}
-    last_seen: Dict[str, Optional[float]] = {t[0]: None for t in task_defs}
-    ever_seen: Dict[str, bool] = {t[0]: False for t in task_defs}
+    states: Dict[str, TaskState] = {}
 
     for f in frames_det:
-        t = float(f["t_sec"])
-        det = f["det"]
-        cls_names = f["cls_names"]
+        t_sec = float(f.get("t_sec", 0.0))
+        det = f.get("det", None)
+        cls_names: Dict[int, str] = f.get("cls_names", {})
 
-        for task, class_set, roi, ev in task_defs:
-            present = _classes_present_in_frame(det, cls_names, class_set, roi=roi)
-            if present:
-                ever_seen[task] = True
-                if first_seen[task] is None:
-                    first_seen[task] = t
-                last_seen[task] = t
+        for task, cls_set in cls_sets.items():
+            roi = rois.get(task)
+            stt = states.get(task, TaskState(task=task, status="NOT_STARTED"))
+            present = _classes_present_in_frame(det, cls_names, cls_set, roi=roi)
+            stt = update_task_state(stt, present, t_sec, done_after_sec=done_after_sec)
+            states[task] = stt
 
-    # Determine status based on last frame time
-    last_t = float(frames_det[-1]["t_sec"])
-
-    out: List[TaskState] = []
-    for task, class_set, roi, ev in task_defs:
-        fs = first_seen[task]
-        ls = last_seen[task]
-
-        if not ever_seen[task]:
-            out.append(TaskState(task=task, status="NOT_STARTED", since_sec=None, last_seen_sec=None, evidence=ev))
-            continue
-
-        # ACTIVE if seen recently
-        if ls is not None and (last_t - ls) <= done_grace_seconds:
-            out.append(TaskState(task=task, status="ACTIVE", since_sec=fs, last_seen_sec=ls, evidence=ev))
-            continue
-
-        # DONE if it lasted long enough and isn't active anymore
-        if fs is not None and ls is not None and (ls - fs) >= min_active_seconds:
-            out.append(TaskState(task=task, status="DONE", since_sec=fs, last_seen_sec=ls, evidence=ev))
-        else:
-            # Seen only briefly → treat as NOT_STARTED (noise)
-            out.append(TaskState(task=task, status="NOT_STARTED", since_sec=None, last_seen_sec=None, evidence=ev))
-
-    return out
+    return states
