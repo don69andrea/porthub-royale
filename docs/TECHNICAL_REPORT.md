@@ -146,9 +146,17 @@ def update(detections):
 
 #### 3.2.5 Sequence State Machine
 
-**Turnaround Workflow**:
+**Process Model Foundation**:
+Our system is based on the official **Zurich Airport (ZRH) turnaround process model** (see `data/rules_to_be_checked/zrh_turnaround.json`). The complete process comprises 17 tasks across 3 parallel streams:
+- **Passenger Stream**: Deboarding → Cleaning → Catering → Boarding
+- **Below-Wing Stream**: Unload → Refuel → Load
+- **Technical Stream**: FOD Check → Water → Walkaround
+
+**Prototype Scope** (Below-Wing Critical Path):
+For this prototype, we implement the **Below-Wing operations**, representing ~60% of turnaround time and the most safety-critical tasks:
+
 1. **GPU connected** (t < 120s deadline)
-2. **Fueling** (requires GPU done)
+2. **Fueling** (requires GPU done) — *Fire hazard zone*
 3. **Baggage loading** (requires GPU done)
 4. **Pushback** (requires Fuel + Baggage done)
 
@@ -285,11 +293,13 @@ Injected 15 safety scenarios (personnel in restricted zones):
 
 ### 6.4 Future Work
 
-1. **Multi-camera fusion**: Triangulate positions across cameras
-2. **Predictive delays**: ML model to forecast late pushback
-3. **NLP interface**: "Show me fuel truck trajectory" (LLM + knowledge graph)
-4. **Edge deployment**: Deploy on NVIDIA Jetson for live streams
-5. **Formal verification**: Prove safety properties of rules engine
+1. **Full process implementation**: Extend to all 17 tasks from ZRH turnaround model (Passenger + Technical streams)
+2. **Multi-camera fusion**: Triangulate positions across cameras
+3. **Predictive delays**: ML model to forecast late pushback based on historical data
+4. **Semantic integration**: Load RDF ontology (`zrh_turnaround.ttl`) for reasoning over process constraints
+5. **NLP interface**: "Show me fuel truck trajectory" (LLM + knowledge graph)
+6. **Edge deployment**: Deploy on NVIDIA Jetson for live streams
+7. **Formal verification**: Prove safety properties of rules engine using BPMN formal semantics
 
 ---
 
