@@ -259,13 +259,18 @@ def _load_font(size: int):
     try:
         return ImageFont.truetype("arial.ttf", size)
     except Exception:
-        return ImageFont.load_default()
+        try:
+            # macOS fallback
+            return ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size)
+        except Exception:
+            return ImageFont.load_default()
 
 
 def draw_overlay(img: Image.Image, dets_df: pd.DataFrame, title: str = "", rois=None, asset_roles=None) -> Image.Image:
     out = img.copy()
     d = ImageDraw.Draw(out)
-    font = _load_font(14)
+    font = _load_font(18)  # Increased from 14 to 18 for better visibility
+    font_roi = _load_font(16)  # For ROI labels
 
     w, h = out.size
     if title:
@@ -277,8 +282,11 @@ def draw_overlay(img: Image.Image, dets_df: pd.DataFrame, title: str = "", rois=
             if roi is None:
                 continue
             x1, y1, x2, y2 = roi
-            d.rectangle((x1, y1, x2, y2), outline=(0, 255, 0), width=2)
-            d.text((x1 + 4, max(2, y1 - 18)), k, fill=(0, 255, 0), font=font)
+            d.rectangle((x1, y1, x2, y2), outline=(0, 255, 0), width=3)  # Thicker line
+            # ROI label with background
+            label_y = max(2, y1 - 22)
+            d.rectangle((x1, label_y, x1 + len(k)*10 + 8, label_y + 20), fill=(0, 180, 0))
+            d.text((x1 + 4, label_y + 2), k, fill=(255, 255, 255), font=font_roi)
 
     if dets_df is not None and not dets_df.empty:
         for _, r in dets_df.iterrows():
@@ -292,15 +300,27 @@ def draw_overlay(img: Image.Image, dets_df: pd.DataFrame, title: str = "", rois=
                 role = str(asset_roles.get(tid, ""))
 
             color = (255, 200, 0)
+            line_width = 3
             if role and role != "UNASSIGNED":
                 color = (0, 220, 255)  # cyan if assigned
+                line_width = 4  # Thicker for assigned vehicles
 
-            d.rectangle((x1, y1, x2, y2), outline=color, width=2)
+            # Draw bounding box
+            d.rectangle((x1, y1, x2, y2), outline=color, width=line_width)
+
+            # Prepare label text
             txt = f"{label} #{tid} {conf:.2f}"
             if role and role != "UNASSIGNED":
                 txt += f" [{role}]"
 
-            d.rectangle((x1, y1, x1 + 260, y1 + 24), fill=(0, 0, 0))
-            d.text((x1 + 4, y1 + 4), txt, fill=color, font=font)
+            # Label background (bigger, more visible)
+            label_height = 28
+            label_width = len(txt) * 10 + 10
+            label_y = max(0, y1 - label_height - 2)  # Above box, or at top if no space
+
+            # Draw semi-transparent background for label
+            d.rectangle((x1, label_y, x1 + label_width, label_y + label_height), fill=(0, 0, 0, 200))
+            # Draw text
+            d.text((x1 + 5, label_y + 5), txt, fill=color, font=font)
 
     return out
