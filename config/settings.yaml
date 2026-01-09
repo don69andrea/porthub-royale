@@ -22,7 +22,7 @@ tracking:
 playback:
   default_fps: 4
   loop_enabled: true
-  frames_folder: "data/frames_1fps"
+  frames_folder: "data/frames"  # Full resolution frames (601 frames ~10min)
 
 # Region of Interest (ROI) Definitions
 # Format: [x1, y1, x2, y2]
