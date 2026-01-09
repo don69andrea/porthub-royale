@@ -5,8 +5,15 @@ pandas==2.2.2
 rdflib==7.0.0
 pyyaml==6.0.2
 Pillow==10.4.0
-# Optional (heavier):
+
+# Optional (heavier) - ML dependencies
 ultralytics==8.2.82
-torch>=2.2.0
-# Optional pose:
+torch==2.2.2  # Exact version for reproducibility
+torchvision==0.17.2
+
+# Optional pose detection
 mediapipe==0.10.14
+
+# Development/Testing
+pytest==8.0.0
+pytest-cov==4.1.0

@@ -1,5 +1,55 @@
+# Virtual environment
 .venv/
+venv/
+env/
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Streamlit
 .streamlit/
+
+# macOS
 .DS_Store
+._*
+
+# Data files (large)
+data/frames/
+data/frames_*/
+data/raw_video/*.mp4
+data/raw_video/*.avi
+data/raw_video/*.mov
+
+# Exports
+results_*.json
+turnaround_*.json
+alerts_*.csv
+*.log
+
+# Model weights
+*.pt
+*.pth
+*.onnx
+yolov*.pt
+
+# Temporary files
+*.tmp
+*.bak
+tmp/
+temp/

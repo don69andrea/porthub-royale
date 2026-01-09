@@ -132,7 +132,106 @@ def yolo_detect(model, img: Image.Image, conf: float, iou: float) -> List[Dict]:
 
 
 def demo_detections(t_sec: float) -> List[Dict]:
-    return []
+    """
+    Realistic turnaround scenario for demo mode (no YOLO required).
+    Simulates: GPU truck arrives → Fuel truck → Baggage loader → Pushback tug
+    Plus: Aircraft, people, and safety scenarios
+    """
+    t = int(t_sec)
+    dets = []
+
+    # Aircraft is always present (parked at gate)
+    dets.append({
+        "bbox": (400, 200, 850, 600),
+        "conf": 0.95,
+        "cls": 4,  # airplane
+        "cls_name": "airplane"
+    })
+
+    # Phase 1: GPU arrives (t=10-120s)
+    if 10 <= t <= 120:
+        dets.append({
+            "bbox": (280, 280, 480, 480),
+            "conf": 0.88,
+            "cls": 7,  # truck
+            "cls_name": "truck"
+        })
+
+    # Phase 2: Fuel truck (t=30-180s)
+    if 30 <= t <= 180:
+        dets.append({
+            "bbox": (680, 220, 920, 440),
+            "conf": 0.91,
+            "cls": 7,  # truck
+            "cls_name": "truck"
+        })
+
+    # Phase 3: Baggage loader (t=40-200s)
+    if 40 <= t <= 200:
+        dets.append({
+            "bbox": (320, 380, 480, 580),
+            "conf": 0.86,
+            "cls": 7,  # truck
+            "cls_name": "truck"
+        })
+
+    # Phase 4: Pushback tug (t=190-250s)
+    if 190 <= t <= 250:
+        dets.append({
+            "bbox": (180, 480, 300, 620),
+            "conf": 0.89,
+            "cls": 2,  # car
+            "cls_name": "car"
+        })
+
+    # Ground crew members (moving around)
+    if 20 <= t <= 240:
+        # Worker near GPU
+        if 20 <= t <= 120:
+            dets.append({
+                "bbox": (350 + (t-20)//5, 450, 390 + (t-20)//5, 550),
+                "conf": 0.82,
+                "cls": 0,  # person
+                "cls_name": "person"
+            })
+
+        # Worker near fuel (appears at t=50)
+        if 50 <= t <= 180:
+            dets.append({
+                "bbox": (750, 380, 790, 500),
+                "conf": 0.79,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+        # Worker near baggage (appears at t=60)
+        if 60 <= t <= 200:
+            dets.append({
+                "bbox": (380, 520, 420, 640),
+                "conf": 0.84,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+    # SAFETY SCENARIO: Person enters engine zone (t=100-110) - DANGER!
+    if 100 <= t <= 110:
+        dets.append({
+            "bbox": (450, 380, 490, 500),
+            "conf": 0.81,
+            "cls": 0,
+            "cls_name": "person"
+        })
+
+    # SAFETY SCENARIO: Person in pushback area (t=195-205) - WARNING!
+    if 195 <= t <= 205:
+        dets.append({
+            "bbox": (220, 520, 260, 640),
+            "conf": 0.77,
+            "cls": 0,
+            "cls_name": "person"
+        })
+
+    return dets
 
 
 def detections_df_from_tracked(tracked: List[Dict]) -> pd.DataFrame:

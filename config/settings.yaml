@@ -1,0 +1,133 @@
+# PortHub Turnaround Prototype - Configuration
+# MAKEathon FHNW 2025
+
+# Application Settings
+app:
+  title: "PortHub Royale — Dispatcher Desk"
+  default_run_id: "run-0001"
+  default_flight: "LX-123"
+  default_gate: "A12"
+
+# Detection & Tracking
+detection:
+  default_confidence: 0.20
+  default_iou: 0.50
+  default_weights: "yolov8n.pt"
+
+tracking:
+  iou_match_threshold: 0.25
+  max_missed_frames: 40
+
+# Playback Settings
+playback:
+  default_fps: 4
+  loop_enabled: true
+  frames_folder: "data/frames_1fps"
+
+# Region of Interest (ROI) Definitions
+# Format: [x1, y1, x2, y2]
+rois:
+  nose:
+    coordinates: [260, 250, 620, 520]
+    description: "Nose/Front of aircraft (GPU connection)"
+
+  fuel:
+    coordinates: [620, 170, 980, 520]
+    description: "Fuel connection area"
+
+  belly:
+    coordinates: [250, 320, 520, 650]
+    description: "Belly/Cargo area (baggage loading)"
+
+  aircraft:
+    coordinates: [250, 120, 980, 690]
+    description: "Full aircraft area"
+
+  engine:
+    coordinates: [330, 300, 620, 560]
+    description: "Engine safety zone (critical)"
+
+  pushback:
+    coordinates: [120, 420, 330, 680]
+    description: "Pushback/tug operation area"
+
+# Asset Role Definitions
+roles:
+  FUEL_TRUCK: "Fuel Truck"
+  GPU_TRUCK: "GPU"
+  BELT_LOADER: "Belt / Baggage"
+  PUSHBACK_TUG: "Tug / Pushback"
+  STAIRS: "Stairs (proxy)"
+  OTHER: "Other"
+  UNASSIGNED: "Unassigned"
+
+# Turnaround Sequence Configuration
+sequence:
+  # Minimum time (seconds) a task must be ACTIVE before marked DONE
+  done_sensitivity: 6.0
+
+  steps:
+    - key: "gpu"
+      title: "GPU connected"
+      deadline_sec: 120
+      requires_done: []
+
+    - key: "fueling"
+      title: "Fueling"
+      deadline_sec: null
+      requires_done: ["gpu"]
+
+    - key: "baggage"
+      title: "Baggage unloading/loading"
+      deadline_sec: null
+      requires_done: ["gpu"]
+
+    - key: "pushback"
+      title: "Pushback"
+      deadline_sec: null
+      requires_done: ["fueling", "baggage"]
+
+# Alert Severity Levels
+alerts:
+  severity_levels:
+    INFO: 0
+    WARNING: 1
+    CRITICAL: 2
+
+  # Safety rules
+  safety:
+    engine_zone:
+      severity: "CRITICAL"
+      message: "DANGER: Person detected in Engine ROI! Engine zone NOT clear."
+
+    pushback_zone:
+      severity: "WARNING"
+      message: "WARNING: Person detected in Pushback ROI! Area NOT clear."
+
+    airside_presence:
+      severity: "INFO"
+      message: "Person detected airside (within Aircraft ROI). Normal during turnaround."
+
+# Display Settings
+display:
+  overlay_classes:
+    - "airplane"
+    - "person"
+    - "truck"
+    - "car"
+    - "bus"
+    - "train"
+
+  show_rois_default: false
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "turnaround.log"
+  max_events: 120  # Max events in UI event log
+
+# Performance
+performance:
+  cache_frames: true
+  cache_detections: false  # Set true for faster playback on same video
