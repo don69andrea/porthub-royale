@@ -343,7 +343,7 @@ with st.sidebar:
 
     st.header("Detection")
     demo_mode = st.checkbox("Demo Mode (no ML deps)", value=False)
-    conf = st.slider("Confidence", 0.05, 0.95, 0.20, 0.01)
+    conf = st.slider("Confidence", 0.05, 0.95, 0.35, 0.01)
     iou = st.slider("IoU", 0.05, 0.95, 0.50, 0.01)
     weights = st.text_input("YOLO weights", value="yolov8n.pt")
 
@@ -354,7 +354,7 @@ with st.sidebar:
     overlay_classes = st.multiselect(
         "Show classes",
         options=["person", "truck", "car", "bus", "train", "airplane"],
-        default=["airplane", "person", "truck", "car", "bus", "train"],
+        default=["person", "truck", "car", "bus", "train"],
     )
 
     roi_nose = st.text_input("nose", value="260,250,620,520")
@@ -411,23 +411,6 @@ else:
 tracked = st.session_state.tracker.update(dets)
 dets_df = detections_df_from_tracked(tracked)
 
-# --- DEBUG: class counts (quick truth check) ---
-debug_det = st.sidebar.checkbox("Debug detections", value=False)
-
-if debug_det and dets_df is not None and not dets_df.empty:
-    st.sidebar.markdown("### Debug: detections per class")
-    if "cls_name" in dets_df.columns:
-        counts = dets_df.groupby("cls_name").size().sort_values(ascending=False)
-        st.sidebar.dataframe(counts)
-
-        plane = dets_df[dets_df["cls_name"] == "airplane"]
-        if not plane.empty and "conf" in plane.columns:
-            st.sidebar.success(f"airplane detections: {len(plane)} (max conf {plane['conf'].max():.2f})")
-        else:
-            st.sidebar.warning("airplane detections: 0")
-    else:
-        st.sidebar.info("No cls_name column in detections dataframe.")
-
 # keep tagging stable even if track_ids change
 _update_role_memory(dets_df, now_t=t_sec)
 _role_handoff(dets_df, now_t=t_sec)
@@ -475,73 +458,12 @@ with left:
         dets_df_view = dets_df_view[dets_df_view["cls_name"].isin(overlay_classes)].copy()
 
     overlay = draw_overlay(img, dets_df_view, title=title, rois=overlay_rois, asset_roles=st.session_state.asset_roles)
-    st.image(overlay, use_container_width=True)
+    st.image(overlay, width="stretch")
 
 with right:
     st.markdown("## Dispatcher Console")
     st.markdown("**Turnaround**")
     st.caption(f"Flight: **LX-123** (Gate A12) · Run: `{st.session_state.run_id}`")
-
-    # Export functionality
-    st.markdown("### Export Results")
-    col_exp1, col_exp2 = st.columns(2)
-    with col_exp1:
-        if st.button("📊 Export JSON", use_container_width=True):
-            import json
-            from datetime import datetime
-
-            export_data = {
-                "run_id": st.session_state.run_id,
-                "timestamp": datetime.now().isoformat(),
-                "current_time_sec": float(t_sec),
-                "alerts": [
-                    {
-                        "alert_id": a.alert_id,
-                        "severity": a.severity,
-                        "rule_id": a.rule_id,
-                        "message": a.message,
-                        "first_seen": float(a.first_seen),
-                        "last_seen": float(a.last_seen),
-                        "status": a.status
-                    }
-                    for a in st.session_state.alerts.values()
-                ],
-                "task_history": {
-                    k: {
-                        "status": v.get("status"),
-                        "since": float(v.get("since")) if v.get("since") is not None else None,
-                        "last_seen": float(v.get("last_seen")) if v.get("last_seen") is not None else None
-                    }
-                    for k, v in st.session_state.task_hist.items()
-                },
-                "sequence_state": {
-                    "current_idx": st.session_state.seq_state.current_idx,
-                    "started_at": {k: float(v) for k, v in st.session_state.seq_state.started_at.items()},
-                    "done_at": {k: float(v) for k, v in st.session_state.seq_state.done_at.items()}
-                },
-                "asset_roles": {str(k): v for k, v in st.session_state.asset_roles.items()}
-            }
-
-            json_str = json.dumps(export_data, indent=2)
-            st.download_button(
-                label="⬇️ Download JSON",
-                data=json_str,
-                file_name=f"turnaround_{st.session_state.run_id}_{int(t_sec)}s.json",
-                mime="application/json"
-            )
-
-    with col_exp2:
-        if st.button("📄 Export CSV", use_container_width=True):
-            if alerts_df is not None and not alerts_df.empty:
-                csv = alerts_df.to_csv(index=False)
-                st.download_button(
-                    label="⬇️ Download CSV",
-                    data=csv,
-                    file_name=f"alerts_{st.session_state.run_id}_{int(t_sec)}s.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.info("No alerts to export")
 
     st.markdown("### Asset tagging (human-in-the-loop)")
     st.caption("Tag detected vehicles once → tasks become realistic.")
@@ -551,132 +473,129 @@ with right:
 # Tabs under frame
 # ----------------------------
 st.markdown("---")
-ops_slot = st.empty()
-
-with ops_slot.container():
-    tabs = st.tabs(["Turnaround Operations", "Alerts", "Event log", "Timeline"])
+tabs = st.tabs(["Turnaround Operations", "Alerts", "Event log", "Timeline"])
 
 
-    def _seq_step_status(step_key: str, requires: List[str], now_t: float, deadline: Optional[float]) -> Tuple[str, str]:
-        th = st.session_state.task_hist.get(step_key, {})
-        status = str(th.get("status", "NOT_STARTED"))
+def _seq_step_status(step_key: str, requires: List[str], now_t: float, deadline: Optional[float]) -> Tuple[str, str]:
+    th = st.session_state.task_hist.get(step_key, {})
+    status = str(th.get("status", "NOT_STARTED"))
 
-        prereq_done = all(
-            (k in st.session_state.seq_state.done_at) or (str(st.session_state.task_hist.get(k, {}).get("status")) == "DONE")
-            for k in requires
-        )
-        active = (status == "ACTIVE")
-        done = (step_key in st.session_state.seq_state.done_at) or (status == "DONE")
+    prereq_done = all(
+        (k in st.session_state.seq_state.done_at) or (str(st.session_state.task_hist.get(k, {}).get("status")) == "DONE")
+        for k in requires
+    )
+    active = (status == "ACTIVE")
+    done = (step_key in st.session_state.seq_state.done_at) or (status == "DONE")
 
-        if done:
-            return "DONE", "completed"
-        if active:
-            return "ACTIVE", "in progress"
-        if not prereq_done:
-            return "BLOCKED", "waiting for prerequisites"
-        if deadline is not None and now_t >= float(deadline) and (step_key not in st.session_state.seq_state.started_at):
-            return "OVERDUE", f"deadline t={float(deadline):.0f}s"
-        return "WAITING", "next in queue"
-
-
-    def _pill(label: str) -> Tuple[str, str]:
-        if label == "DONE":
-            return "DONE", "#1f7a3a"
-        if label == "ACTIVE":
-            return "ACTIVE", "#1f7a3a"
-        if label == "BLOCKED":
-            return "BLOCKED", "#7a1f1f"
-        if label == "OVERDUE":
-            return "OVERDUE", "#b34b00"
-        return "WAITING", "#3b3b3b"
+    if done:
+        return "DONE", "completed"
+    if active:
+        return "ACTIVE", "in progress"
+    if not prereq_done:
+        return "BLOCKED", "waiting for prerequisites"
+    if deadline is not None and now_t >= float(deadline) and (step_key not in st.session_state.seq_state.started_at):
+        return "OVERDUE", f"deadline t={float(deadline):.0f}s"
+    return "WAITING", "next in queue"
 
 
-    with tabs[0]:
-        st.markdown("### Sequence State Machine")
-        st.caption("GPU → Fuel → Baggage → Pushback")
-
-        st.session_state.seq_done_sensitivity = st.slider(
-            "DONE sensitivity",
-            min_value=1.0,
-            max_value=20.0,
-            value=float(st.session_state.seq_done_sensitivity),
-            step=0.5,
-        )
-
-        done_count = 0
-        for s in seq:
-            th = st.session_state.task_hist.get(s.key, {})
-            if (s.key in st.session_state.seq_state.done_at) or (str(th.get("status")) == "DONE"):
-                done_count += 1
-        st.progress(done_count / max(1, len(seq)))
-        st.caption(f"{done_count}/{len(seq)} steps done")
-
-        for step in seq:
-            requires = step.requires_done
-            status_label, hint = _seq_step_status(step.key, requires, t_sec, step.deadline_sec)
-            display, color = _pill(status_label)
-
-            left2, mid2, right2 = st.columns([1.4, 1.2, 2.2], gap="small")
-            with left2:
-                st.markdown(f"**{step.title}**")
-                st.caption("requires: " + (", ".join(requires) if requires else "—"))
-
-            with mid2:
-                st.markdown(
-                    f"<span style='display:inline-block;padding:0.20rem 0.55rem;border-radius:0.65rem;"
-                    f"background:{color};color:white;font-weight:600;font-size:0.80rem'>{display}</span>",
-                    unsafe_allow_html=True,
-                )
-
-                extra = []
-                if step.deadline_sec is not None:
-                    if t_sec < float(step.deadline_sec):
-                        extra.append(f"deadline in {float(step.deadline_sec - t_sec):.0f}s")
-                    else:
-                        extra.append(f"deadline passed by {float(t_sec - step.deadline_sec):.0f}s")
-                if step.key in st.session_state.seq_state.started_at:
-                    extra.append(f"started at {st.session_state.seq_state.started_at[step.key]:.0f}s")
-                if step.key in st.session_state.seq_state.done_at:
-                    extra.append(f"done at {st.session_state.seq_state.done_at[step.key]:.0f}s")
-
-                st.caption(" · ".join([hint] + extra) if extra else hint)
-
-            with right2:
-                with st.expander("Task evidence", expanded=False):
-                    th = st.session_state.task_hist.get(step.key, {})
-                    st.code(str(th), language="json")
+def _pill(label: str) -> Tuple[str, str]:
+    if label == "DONE":
+        return "DONE", "#1f7a3a"
+    if label == "ACTIVE":
+        return "ACTIVE", "#1f7a3a"
+    if label == "BLOCKED":
+        return "BLOCKED", "#7a1f1f"
+    if label == "OVERDUE":
+        return "OVERDUE", "#b34b00"
+    return "WAITING", "#3b3b3b"
 
 
-    with tabs[1]:
-        st.markdown("### Alerts")
-        st.caption("Unified alert feed: safety + sequence (order/deadline)")
+with tabs[0]:
+    st.markdown("### Sequence State Machine")
+    st.caption("GPU → Fuel → Baggage → Pushback")
 
-        if alerts_df is None or alerts_df.empty:
-            st.info("No active alerts.")
-        else:
-            st.dataframe(alerts_df, width="stretch")
+    st.session_state.seq_done_sensitivity = st.slider(
+        "DONE sensitivity",
+        min_value=1.0,
+        max_value=20.0,
+        value=float(st.session_state.seq_done_sensitivity),
+        step=0.5,
+    )
+
+    done_count = 0
+    for s in seq:
+        th = st.session_state.task_hist.get(s.key, {})
+        if (s.key in st.session_state.seq_state.done_at) or (str(th.get("status")) == "DONE"):
+            done_count += 1
+    st.progress(done_count / max(1, len(seq)))
+    st.caption(f"{done_count}/{len(seq)} steps done")
+
+    for step in seq:
+        requires = step.requires_done
+        status_label, hint = _seq_step_status(step.key, requires, t_sec, step.deadline_sec)
+        display, color = _pill(status_label)
+
+        left2, mid2, right2 = st.columns([1.4, 1.2, 2.2], gap="small")
+        with left2:
+            st.markdown(f"**{step.title}**")
+            st.caption("requires: " + (", ".join(requires) if requires else "—"))
+
+        with mid2:
+            st.markdown(
+                f"<span style='display:inline-block;padding:0.20rem 0.55rem;border-radius:0.65rem;"
+                f"background:{color};color:white;font-weight:600;font-size:0.80rem'>{display}</span>",
+                unsafe_allow_html=True,
+            )
+
+            extra = []
+            if step.deadline_sec is not None:
+                if t_sec < float(step.deadline_sec):
+                    extra.append(f"deadline in {float(step.deadline_sec - t_sec):.0f}s")
+                else:
+                    extra.append(f"deadline passed by {float(t_sec - step.deadline_sec):.0f}s")
+            if step.key in st.session_state.seq_state.started_at:
+                extra.append(f"started at {st.session_state.seq_state.started_at[step.key]:.0f}s")
+            if step.key in st.session_state.seq_state.done_at:
+                extra.append(f"done at {st.session_state.seq_state.done_at[step.key]:.0f}s")
+
+            st.caption(" · ".join([hint] + extra) if extra else hint)
+
+        with right2:
+            st.markdown("**Task evidence**")
+            th = st.session_state.task_hist.get(step.key, {})
+            st.code(str(th), language="json")
 
 
-    with tabs[2]:
-        st.markdown("### Event log")
-        if not st.session_state.event_log:
-            st.info("No events yet.")
-        else:
-            rows = [{"t": e.t_sec, "level": e.level, "msg": e.msg} for e in st.session_state.event_log[-120:]]
-            df = pd.DataFrame(rows).sort_values("t", ascending=False)
-            st.dataframe(df, width="stretch")
+with tabs[1]:
+    st.markdown("### Alerts")
+    st.caption("Unified alert feed: safety + sequence (order/deadline)")
+
+    if alerts_df is None or alerts_df.empty:
+        st.info("No active alerts.")
+    else:
+        st.dataframe(alerts_df, width="stretch")
 
 
-    with tabs[3]:
-        st.markdown("### Timeline")
-        rows = []
-        for k, h in st.session_state.task_hist.items():
-            rows.append({"task": k, "status": h.get("status"), "since": h.get("since"), "last_seen": h.get("last_seen")})
-        df = pd.DataFrame(rows)
-        if df.empty:
-            st.info("No task history.")
-        else:
-            st.dataframe(df.sort_values(["status", "task"]), width="stretch")
+with tabs[2]:
+    st.markdown("### Event log")
+    if not st.session_state.event_log:
+        st.info("No events yet.")
+    else:
+        rows = [{"t": e.t_sec, "level": e.level, "msg": e.msg} for e in st.session_state.event_log[-120:]]
+        df = pd.DataFrame(rows).sort_values("t", ascending=False)
+        st.dataframe(df, width="stretch")
+
+
+with tabs[3]:
+    st.markdown("### Timeline")
+    rows = []
+    for k, h in st.session_state.task_hist.items():
+        rows.append({"task": k, "status": h.get("status"), "since": h.get("since"), "last_seen": h.get("last_seen")})
+    df = pd.DataFrame(rows)
+    if df.empty:
+        st.info("No task history.")
+    else:
+        st.dataframe(df.sort_values(["status", "task"]), width="stretch")
 
 
 # ----------------------------

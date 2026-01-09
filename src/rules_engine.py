@@ -171,14 +171,15 @@ def compute_alerts_df(
     log: Callable[[str, float, str], None],
 ) -> pd.DataFrame:
     # Safety: engine zone not clear
+    # ACTIVE = person IS in engine zone → DANGER!
     h = task_hist.get("safety_engine_clear", {})
-    if h.get("status") == "INACTIVE":
+    if h.get("status") == "ACTIVE":
         _upsert_alert(
             alerts,
             alert_id="engine_zone_not_clear",
             severity="CRITICAL",
             rule_id="safety_engine_clear",
-            message="Engine zone NOT clear (person detected in Engine ROI).",
+            message="DANGER: Person detected in Engine ROI! Engine zone NOT clear.",
             now_t=now_t,
             log=log,
         )
@@ -186,14 +187,15 @@ def compute_alerts_df(
         _close_alert(alerts, alert_id="engine_zone_not_clear", now_t=now_t)
 
     # Safety: pushback area not clear
+    # ACTIVE = person IS in pushback zone → WARNING!
     h = task_hist.get("safety_pushback_clear", {})
-    if h.get("status") == "INACTIVE":
+    if h.get("status") == "ACTIVE":
         _upsert_alert(
             alerts,
             alert_id="pushback_area_not_clear",
             severity="WARNING",
             rule_id="safety_pushback_clear",
-            message="Pushback area NOT clear (person detected in Pushback ROI).",
+            message="WARNING: Person detected in Pushback ROI! Area NOT clear.",
             now_t=now_t,
             log=log,
         )
@@ -201,14 +203,15 @@ def compute_alerts_df(
         _close_alert(alerts, alert_id="pushback_area_not_clear", now_t=now_t)
 
     # Safety: generic airside presence (informational)
+    # ACTIVE = person IS airside → INFO (expected during turnaround)
     h = task_hist.get("safety_airside_presence", {})
-    if h.get("status") == "INACTIVE":
+    if h.get("status") == "ACTIVE":
         _upsert_alert(
             alerts,
             alert_id="airside_person_present",
             severity="INFO",
             rule_id="safety_airside_presence",
-            message="Person detected airside (within Aircraft ROI).",
+            message="Person detected airside (within Aircraft ROI). Normal during turnaround.",
             now_t=now_t,
             log=log,
         )
