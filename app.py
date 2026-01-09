@@ -309,7 +309,7 @@ _init_dispatcher_state(run_id)
 # ----------------------------
 with st.sidebar:
     st.header("Input")
-    frames_folder = st.text_input("Frames folder", value="data/frames_1fps")
+    frames_folder = st.text_input("Frames folder", value="data/frames")
 
     st.header("Playback (Live view)")
     playback_fps = st.slider("Playback FPS", 1, 12, 4)
