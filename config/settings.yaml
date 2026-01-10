@@ -52,8 +52,8 @@ rois:
     description: "Pushback/tug operation area"
 
   passenger_door:
-    coordinates: [850, 180, 1050, 480]
-    description: "Passenger boarding/deboarding at fingerdock (gray cover area)"
+    coordinates: [920, 140, 1120, 380]
+    description: "Passenger boarding/deboarding at fingerdock (right side, UBS area)"
 
   fingerdock:
     coordinates: [820, 160, 1080, 500]
