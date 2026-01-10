@@ -455,6 +455,60 @@ _update_role_memory(dets_df, now_t=t_sec)
 _role_handoff(dets_df, now_t=t_sec)
 
 # ----------------------------
+# Passenger flow & fingerdock detection (NEW)
+# ----------------------------
+from src.passenger_flow import update_passenger_flow
+from src.fingerdock_detection import detect_fingerdock
+
+# Detect passenger movement direction and flow status
+passenger_flow_status = update_passenger_flow(
+    dets_df=dets_df,
+    roi_passenger_door=rois.get("passenger_door"),
+    t_sec=t_sec,
+    state=st.session_state.passenger_flow_state,
+)
+
+# Update task_hist with passenger flow statuses
+for task_key, status in passenger_flow_status.items():
+    if task_key in st.session_state.task_hist:
+        prev_status = st.session_state.task_hist[task_key].get("status")
+        if prev_status != status:
+            st.session_state.task_hist[task_key]["status"] = status
+            st.session_state.task_hist[task_key]["since"] = t_sec
+            _log("task", t_sec, f"{task_key} => {status}")
+        st.session_state.task_hist[task_key]["last_seen"] = t_sec
+    else:
+        st.session_state.task_hist[task_key] = {
+            "status": status,
+            "since": t_sec,
+            "last_seen": t_sec
+        }
+
+# Detect fingerdock position
+fingerdock_status = detect_fingerdock(
+    dets_df=dets_df,
+    roi_fingerdock=rois.get("fingerdock"),
+    t_sec=t_sec,
+    state=st.session_state.fingerdock_state,
+)
+
+# Update task_hist with fingerdock status
+task_key = "fingerdock"
+if task_key in st.session_state.task_hist:
+    prev_status = st.session_state.task_hist[task_key].get("status")
+    if prev_status != fingerdock_status:
+        st.session_state.task_hist[task_key]["status"] = fingerdock_status
+        st.session_state.task_hist[task_key]["since"] = t_sec
+        _log("task", t_sec, f"{task_key} => {fingerdock_status}")
+    st.session_state.task_hist[task_key]["last_seen"] = t_sec
+else:
+    st.session_state.task_hist[task_key] = {
+        "status": fingerdock_status,
+        "since": t_sec,
+        "last_seen": t_sec
+    }
+
+# ----------------------------
 # Evaluate tasks + sequence + alerts
 # ----------------------------
 eval_tasks(
