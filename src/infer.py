@@ -134,7 +134,7 @@ def yolo_detect(model, img: Image.Image, conf: float, iou: float) -> List[Dict]:
 def demo_detections(t_sec: float) -> List[Dict]:
     """
     Realistic turnaround scenario for demo mode (no YOLO required).
-    Simulates: GPU truck arrives → Fuel truck → Baggage loader → Pushback tug
+    Simulates: Passenger deboarding → GPU → Fuel → Baggage → Passenger boarding → Pushback
     Plus: Aircraft, people, and safety scenarios
     """
     t = int(t_sec)
@@ -147,6 +147,82 @@ def demo_detections(t_sec: float) -> List[Dict]:
         "cls": 4,  # airplane
         "cls_name": "airplane"
     })
+
+    # PASSENGER DEBOARDING (t=5-60s) - People moving left to right at fingerdock window
+    # Simulate 3-5 passengers exiting through passenger_door ROI (980-1180, 200-500)
+    if 5 <= t <= 60:
+        # Passenger 1 - moves from left to right (deboarding)
+        if 5 <= t <= 25:
+            x_pos = 1000 + (t - 5) * 5  # Moving right
+            dets.append({
+                "bbox": (x_pos, 280, x_pos + 35, 380),
+                "conf": 0.78,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+        # Passenger 2 - slightly behind
+        if 10 <= t <= 30:
+            x_pos = 990 + (t - 10) * 5
+            dets.append({
+                "bbox": (x_pos, 320, x_pos + 35, 420),
+                "conf": 0.81,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+        # Passenger 3
+        if 20 <= t <= 45:
+            x_pos = 1000 + (t - 20) * 4
+            dets.append({
+                "bbox": (x_pos, 300, x_pos + 35, 400),
+                "conf": 0.76,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+        # Passenger 4
+        if 30 <= t <= 55:
+            x_pos = 995 + (t - 30) * 5
+            dets.append({
+                "bbox": (x_pos, 290, x_pos + 35, 390),
+                "conf": 0.79,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+    # PASSENGER BOARDING (t=210-260s) - People moving left to right at fingerdock window
+    # Simulate passengers boarding after baggage is loaded
+    if 210 <= t <= 260:
+        # Boarding passenger 1
+        if 210 <= t <= 235:
+            x_pos = 1010 + (t - 210) * 4
+            dets.append({
+                "bbox": (x_pos, 285, x_pos + 35, 385),
+                "conf": 0.77,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+        # Boarding passenger 2
+        if 220 <= t <= 245:
+            x_pos = 1000 + (t - 220) * 5
+            dets.append({
+                "bbox": (x_pos, 310, x_pos + 35, 410),
+                "conf": 0.80,
+                "cls": 0,
+                "cls_name": "person"
+            })
+
+        # Boarding passenger 3
+        if 230 <= t <= 255:
+            x_pos = 1005 + (t - 230) * 4
+            dets.append({
+                "bbox": (x_pos, 295, x_pos + 35, 395),
+                "conf": 0.75,
+                "cls": 0,
+                "cls_name": "person"
+            })
 
     # Phase 1: GPU arrives (t=10-120s)
     if 10 <= t <= 120:
