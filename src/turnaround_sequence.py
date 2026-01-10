@@ -46,7 +46,8 @@ def _status(task_hist: Dict[str, Dict[str, Any]], key: str) -> str:
 
 
 def _is_active(task_hist: Dict[str, Dict[str, Any]], key: str) -> bool:
-    return _status(task_hist, key) == "ACTIVE"
+    status = _status(task_hist, key)
+    return status in ["ACTIVE", "STARTED", "ONGOING", "OPERATING", "CONNECTED"]
 
 
 def _is_inactive(task_hist: Dict[str, Dict[str, Any]], key: str) -> bool:

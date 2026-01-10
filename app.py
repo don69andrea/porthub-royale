@@ -381,7 +381,7 @@ with st.sidebar:
     roi_aircraft = st.text_input("aircraft", value="250,120,980,690")
     roi_engine = st.text_input("engine", value="330,300,620,560")
     roi_pushback = st.text_input("pushback", value="120,420,330,680")
-    roi_passenger_door = st.text_input("passenger_door (fingerdock)", value="850,180,1050,480")
+    roi_passenger_door = st.text_input("passenger_door (fingerdock)", value="920,140,1120,380")
     roi_fingerdock = st.text_input("fingerdock", value="820,160,1080,500")
 
 # Parse ROIs
@@ -624,7 +624,7 @@ with left:
         # Detections count - NO EMOJIS
         st.markdown(f"""
         <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
-            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>AIRSIDE</div>
+            <div style='color: #9ca3af; font-size: 10px; font-weight: 600; letter-spacing: 0.5px;'>AIRSIDE AIRCRAFT RELEVANT</div>
             <div style='color: white; font-size: 14px; font-weight: 700; margin-top: 4px;'>{person_count}P · {vehicle_count}V</div>
         </div>
         """, unsafe_allow_html=True)
