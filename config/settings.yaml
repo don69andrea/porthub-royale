@@ -51,6 +51,10 @@ rois:
     coordinates: [120, 420, 330, 680]
     description: "Pushback/tug operation area"
 
+  passenger_door:
+    coordinates: [980, 200, 1180, 500]
+    description: "Passenger boarding/deboarding door (fingerdock window area)"
+
 # Asset Role Definitions
 roles:
   FUEL_TRUCK: "Fuel Truck"
@@ -67,6 +71,11 @@ sequence:
   done_sensitivity: 6.0
 
   steps:
+    - key: "passenger_deboarding"
+      title: "Passenger Deboarding"
+      deadline_sec: 180
+      requires_done: []
+
     - key: "gpu"
       title: "GPU connected"
       deadline_sec: 120
@@ -82,10 +91,15 @@ sequence:
       deadline_sec: null
       requires_done: ["gpu"]
 
+    - key: "passenger_boarding"
+      title: "Passenger Boarding"
+      deadline_sec: null
+      requires_done: ["baggage"]
+
     - key: "pushback"
       title: "Pushback"
       deadline_sec: null
-      requires_done: ["fueling", "baggage"]
+      requires_done: ["fueling", "baggage", "passenger_boarding"]
 
 # Alert Severity Levels
 alerts:

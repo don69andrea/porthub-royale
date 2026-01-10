@@ -21,16 +21,20 @@ class SequenceState:
     current_idx: int = 0
     started_at: Dict[str, float] = field(default_factory=dict)
     done_at: Dict[str, float] = field(default_factory=dict)
+    steps: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def default_sequence() -> List[StepSpec]:
     # keys must match TASKS keys from rules_engine.py:
-    # gpu, fueling, baggage, pushback, safety_* are handled via alerts, not sequence order
+    # gpu, fueling, baggage, passenger_*, pushback
+    # safety_* are handled via alerts, not sequence order
     return [
+        StepSpec(key="passenger_deboarding", title="Passenger Deboarding", deadline_sec=180),
         StepSpec(key="gpu", title="GPU connected", deadline_sec=120),
         StepSpec(key="fueling", title="Fueling", requires_done=["gpu"]),
         StepSpec(key="baggage", title="Baggage unloading/loading", requires_done=["gpu"]),
-        StepSpec(key="pushback", title="Pushback", requires_done=["fueling", "baggage"]),
+        StepSpec(key="passenger_boarding", title="Passenger Boarding", requires_done=["baggage"]),
+        StepSpec(key="pushback", title="Pushback", requires_done=["fueling", "baggage", "passenger_boarding"]),
     ]
 
 
@@ -125,6 +129,9 @@ def update_sequence(
             seq_state.current_idx += 1
         else:
             break
+
+    # 5) Update seq_state.steps for dashboard
+    seq_state.steps = [{"key": s.key, "title": s.title} for s in seq]
 
     return seq
 # ----------------------------
