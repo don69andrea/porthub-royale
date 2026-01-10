@@ -96,6 +96,24 @@ def _init_dispatcher_state(run_id: str):
     if "t_sec" not in st.session_state:
         st.session_state.t_sec = 0.0
 
+    # Dashboard stability (prevent flickering)
+    if "dashboard_state" not in st.session_state:
+        st.session_state.dashboard_state = {
+            "active_tasks_display": "",
+            "active_tasks_last_change": 0.0,
+            "stability_delay": 5.0,  # Show state for minimum 5 seconds
+        }
+
+    # Passenger flow state
+    if "passenger_flow_state" not in st.session_state:
+        from src.passenger_flow import PassengerFlowState
+        st.session_state.passenger_flow_state = PassengerFlowState()
+
+    # Fingerdock state
+    if "fingerdock_state" not in st.session_state:
+        from src.fingerdock_detection import FingerdockState
+        st.session_state.fingerdock_state = FingerdockState()
+
 
 def _upsert_alert(alert_id: str, severity: str, rule_id: str, message: str, now_t: float):
     a = st.session_state.alerts.get(alert_id)
@@ -363,7 +381,8 @@ with st.sidebar:
     roi_aircraft = st.text_input("aircraft", value="250,120,980,690")
     roi_engine = st.text_input("engine", value="330,300,620,560")
     roi_pushback = st.text_input("pushback", value="120,420,330,680")
-    roi_passenger_door = st.text_input("passenger_door", value="980,200,1180,500")
+    roi_passenger_door = st.text_input("passenger_door (fingerdock)", value="850,180,1050,480")
+    roi_fingerdock = st.text_input("fingerdock", value="820,160,1080,500")
 
 # Parse ROIs
 rois: Dict[str, Optional[Tuple[int, int, int, int]]] = {
@@ -374,6 +393,7 @@ rois: Dict[str, Optional[Tuple[int, int, int, int]]] = {
     "engine": parse_roi(roi_engine),
     "pushback": parse_roi(roi_pushback),
     "passenger_door": parse_roi(roi_passenger_door),
+    "fingerdock": parse_roi(roi_fingerdock),
 }
 
 # ----------------------------
@@ -472,11 +492,12 @@ with left:
 
     # ----------------------------
     # STATUS DASHBOARD BAR (above live video)
+    # Fixed height to prevent layout shift
     # ----------------------------
     # Count active tasks and safety alerts
     active_tasks = []
     for task_key, task_data in st.session_state.task_hist.items():
-        if task_data.get("status") == "ACTIVE":
+        if task_data.get("status") in ["ACTIVE", "STARTED", "ONGOING"]:
             active_tasks.append(task_key.replace("_", " ").title())
 
     critical_alerts = sum(1 for a in st.session_state.alerts.values() if a.severity == "CRITICAL" and a.status == "ACTIVE")
@@ -493,58 +514,74 @@ with left:
         done_count = sum(1 for step in st.session_state.seq_state.steps if step["key"] in st.session_state.seq_state.done_at)
         seq_progress = int((done_count / len(st.session_state.seq_state.steps)) * 100)
 
-    # Dashboard metrics row
+    # STABILITY: Prevent flickering with 5-second minimum display time
+    current_active_str = ""
+    if active_tasks:
+        current_active_str = ", ".join(active_tasks[:2])
+        if len(active_tasks) > 2:
+            current_active_str += f" +{len(active_tasks)-2}"
+
+    dash_state = st.session_state.dashboard_state
+    time_since_change = t_sec - dash_state["active_tasks_last_change"]
+
+    if current_active_str != dash_state["active_tasks_display"]:
+        # State changed
+        if time_since_change >= dash_state["stability_delay"]:
+            # Enough time passed, allow change
+            dash_state["active_tasks_display"] = current_active_str
+            dash_state["active_tasks_last_change"] = t_sec
+    # else: use cached display value for stability
+
+    display_active_str = dash_state["active_tasks_display"]
+
+    # Dashboard metrics row - FIXED HEIGHT (min-height prevents shifting)
     dash_cols = st.columns([1.5, 1, 1, 1.2])
 
     with dash_cols[0]:
-        # Active tasks indicator (status bar style)
-        if active_tasks:
-            active_str = ", ".join(active_tasks[:2])  # Show max 2 tasks
-            if len(active_tasks) > 2:
-                active_str += f" +{len(active_tasks)-2}"
+        # Active tasks indicator (status bar style) - NO EMOJIS
+        if display_active_str:
             st.markdown(f"""
             <div style='background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 100%);
-                        padding: 12px; border-radius: 8px; text-align: center;'>
-                <div style='color: #60a5fa; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>🔵 ACTIVE TASKS</div>
-                <div style='color: white; font-size: 15px; font-weight: 700; margin-top: 4px;'>{active_str}</div>
+                        padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+                <div style='color: #60a5fa; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>ACTIVE TASKS</div>
+                <div style='color: white; font-size: 14px; font-weight: 700; margin-top: 4px;'>{display_active_str}</div>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
-            <div style='background: #1f2937; padding: 12px; border-radius: 8px; text-align: center;'>
-                <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>⏸️ STANDBY</div>
-                <div style='color: #6b7280; font-size: 15px; font-weight: 700; margin-top: 4px;'>No Active Tasks</div>
+            <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+                <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>STANDBY</div>
+                <div style='color: #6b7280; font-size: 14px; font-weight: 700; margin-top: 4px;'>No Active Tasks</div>
             </div>
             """, unsafe_allow_html=True)
 
     with dash_cols[1]:
-        # Safety alerts
+        # Safety alerts - NO EMOJIS
         alert_color = "#dc2626" if critical_alerts > 0 else ("#f59e0b" if warning_alerts > 0 else "#10b981")
-        alert_icon = "🚨" if critical_alerts > 0 else ("⚠️" if warning_alerts > 0 else "✅")
         alert_text = f"{critical_alerts + warning_alerts} Active" if (critical_alerts + warning_alerts) > 0 else "All Clear"
         st.markdown(f"""
-        <div style='background: #1f2937; padding: 12px; border-radius: 8px; text-align: center;'>
-            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>{alert_icon} SAFETY</div>
-            <div style='color: {alert_color}; font-size: 15px; font-weight: 700; margin-top: 4px;'>{alert_text}</div>
+        <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>SAFETY</div>
+            <div style='color: {alert_color}; font-size: 14px; font-weight: 700; margin-top: 4px;'>{alert_text}</div>
         </div>
         """, unsafe_allow_html=True)
 
     with dash_cols[2]:
-        # Detections count
+        # Detections count - NO EMOJIS
         st.markdown(f"""
-        <div style='background: #1f2937; padding: 12px; border-radius: 8px; text-align: center;'>
-            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>👥 AIRSIDE</div>
-            <div style='color: white; font-size: 15px; font-weight: 700; margin-top: 4px;'>{person_count}P · {vehicle_count}V</div>
+        <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>AIRSIDE</div>
+            <div style='color: white; font-size: 14px; font-weight: 700; margin-top: 4px;'>{person_count}P · {vehicle_count}V</div>
         </div>
         """, unsafe_allow_html=True)
 
     with dash_cols[3]:
-        # Sequence progress
+        # Sequence progress - NO EMOJIS
         progress_color = "#10b981" if seq_progress == 100 else ("#3b82f6" if seq_progress > 0 else "#6b7280")
         st.markdown(f"""
-        <div style='background: #1f2937; padding: 12px; border-radius: 8px; text-align: center;'>
-            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>📊 PROGRESS</div>
-            <div style='color: {progress_color}; font-size: 15px; font-weight: 700; margin-top: 4px;'>{seq_progress}% Complete</div>
+        <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>PROGRESS</div>
+            <div style='color: {progress_color}; font-size: 14px; font-weight: 700; margin-top: 4px;'>{seq_progress}% Complete</div>
         </div>
         """, unsafe_allow_html=True)
 

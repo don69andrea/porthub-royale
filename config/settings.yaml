@@ -52,8 +52,12 @@ rois:
     description: "Pushback/tug operation area"
 
   passenger_door:
-    coordinates: [980, 200, 1180, 500]
-    description: "Passenger boarding/deboarding door (fingerdock window area)"
+    coordinates: [850, 180, 1050, 480]
+    description: "Passenger boarding/deboarding at fingerdock (gray cover area)"
+
+  fingerdock:
+    coordinates: [820, 160, 1080, 500]
+    description: "Fingerdock structure (detection of dock position and cover)"
 
 # Asset Role Definitions
 roles:
