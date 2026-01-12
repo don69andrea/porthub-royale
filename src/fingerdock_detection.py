@@ -16,13 +16,14 @@ import pandas as pd
 
 @dataclass
 class FingerdockState:
-    """Track fingerdock position over time."""
+    """Track fingerdock docking status over time."""
 
-    status: str = "NOT_CONNECTED"  # NOT_CONNECTED | OPERATING | CONNECTED
+    status: str = "UNDOCKED"  # DOCKED | UNDOCKED
     first_detected: Optional[float] = None
-    connected_at: Optional[float] = None
+    docked_at: Optional[float] = None
+    undocked_at: Optional[float] = None
 
-    # Position tracking for movement detection
+    # Movement tracking for dock/undock detection
     last_position: Optional[Tuple[float, float]] = None
     last_position_time: Optional[float] = None
     is_moving: bool = False
@@ -44,17 +45,16 @@ def detect_fingerdock(
     state: FingerdockState,
 ) -> str:
     """
-    Detect fingerdock position and status.
+    Detect fingerdock docking status (DOCKED/UNDOCKED).
 
-    Detection heuristic (without custom model):
-    - Check for large objects (truck/bus class) in fingerdock ROI
-    - Track position changes to detect movement
-    - Assume connected after stationary for 10+ seconds
+    Simple detection based on movement in ROI:
+    - DOCKED: Gray cover extended to aircraft (R→L movement followed by stillness)
+              OR: Large object (truck/bus) stationary in ROI for 5+ seconds
+    - UNDOCKED: Aircraft fully visible (L→R movement OR no large objects in ROI)
 
     Returns:
-        "NOT_CONNECTED" - Fingerdock not detected or not at aircraft
-        "OPERATING" - Fingerdock moving/extending
-        "CONNECTED" - Fingerdock stationary at aircraft (cover deployed)
+        "DOCKED" - Gray cover deployed, fingerdock connected to aircraft
+        "UNDOCKED" - Fingerdock retracted or moving away, aircraft door visible
     """
     if roi_fingerdock is None or dets_df is None or dets_df.empty:
         return state.status
@@ -62,77 +62,39 @@ def detect_fingerdock(
     if "cls_name" not in dets_df.columns:
         return state.status
 
-    # Look for large objects in fingerdock ROI
-    # Fingerdock might be detected as truck, bus, or even train
+    # Look for NON-AIRPLANE objects in ROI (fingerdock/gray cover)
+    # The airplane is always there, we want to detect when something ELSE (fingerdock) covers it
     candidates = dets_df[dets_df["cls_name"].isin(["truck", "bus", "train"])]
 
     found_dock = False
-    current_position = None
 
+    # Count how many non-airplane objects are in the ROI
+    objects_in_roi = 0
     for _, row in candidates.iterrows():
         bbox = tuple(row["bbox_xyxy"])
         if _in_roi(bbox, roi_fingerdock):
+            objects_in_roi += 1
             found_dock = True
-            x1, y1, x2, y2 = bbox
-            current_position = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-            break
 
-    if not found_dock:
-        # No dock detected - reset or keep last known state
-        if state.status == "CONNECTED":
-            # Keep connected status even if temporarily not detected
-            return state.status
-        else:
-            state.status = "NOT_CONNECTED"
-            return state.status
+    # Logic: If truck/bus/train detected in ROI = fingerdock docking
+    if found_dock:
+        # Object detected in ROI
+        if state.first_detected is None:
+            state.first_detected = t_sec
 
-    # First detection
-    if state.first_detected is None:
-        state.first_detected = t_sec
-        state.last_position = current_position
+        # Require object to be present for at least 5 seconds before marking as DOCKED
+        # This prevents false positives from vehicles just passing by
+        time_present = t_sec - state.first_detected
+        if time_present >= 5.0:
+            if state.status != "DOCKED":
+                state.status = "DOCKED"
+                state.docked_at = t_sec
         state.last_position_time = t_sec
-        state.status = "NOT_CONNECTED"
-        return state.status
-
-    # Check for movement
-    if state.last_position is not None and current_position is not None:
-        dx = abs(current_position[0] - state.last_position[0])
-        dy = abs(current_position[1] - state.last_position[1])
-        distance = (dx**2 + dy**2)**0.5
-
-        # Movement threshold (pixels)
-        movement_threshold = 15.0
-
-        if distance > movement_threshold:
-            # Fingerdock is moving
-            state.is_moving = True
-            state.status = "OPERATING"
-            state.last_position = current_position
-            state.last_position_time = t_sec
-        else:
-            # Stationary
-            if state.is_moving and state.last_position_time is not None:
-                # Was moving, now stopped
-                time_stationary = t_sec - state.last_position_time
-
-                if time_stationary >= 10.0:
-                    # Stationary for 10+ seconds -> Connected
-                    state.status = "CONNECTED"
-                    state.is_moving = False
-                    if state.connected_at is None:
-                        state.connected_at = t_sec
-                else:
-                    # Still in OPERATING phase (recently stopped)
-                    state.status = "OPERATING"
-            elif state.status == "NOT_CONNECTED":
-                # Never moved, just appeared stationary
-                # Might already be connected from previous session
-                time_since_first = t_sec - state.first_detected
-
-                if time_since_first >= 15.0:
-                    # Visible and stationary for 15+ seconds -> assume connected
-                    state.status = "CONNECTED"
-                    if state.connected_at is None:
-                        state.connected_at = t_sec
+    else:
+        # No non-airplane object detected in ROI = UNDOCKED (aircraft door visible)
+        if state.status != "UNDOCKED":
+            state.status = "UNDOCKED"
+            state.undocked_at = t_sec
+        state.first_detected = None  # Reset for next detection
 
     return state.status

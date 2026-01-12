@@ -29,12 +29,14 @@ def default_sequence() -> List[StepSpec]:
     # gpu, fueling, baggage, passenger_*, pushback
     # safety_* are handled via alerts, not sequence order
     return [
-        StepSpec(key="passenger_deboarding", title="Passenger Deboarding", deadline_sec=180),
+        StepSpec(key="fingerdock_docked", title="Fingerdock Docked"),
+        StepSpec(key="passenger_unboarding", title="Passenger Unboarding", deadline_sec=180, requires_done=["fingerdock_docked"]),
         StepSpec(key="gpu", title="GPU connected", deadline_sec=120),
         StepSpec(key="fueling", title="Fueling", requires_done=["gpu"]),
-        StepSpec(key="baggage", title="Baggage unloading/loading", requires_done=["gpu"]),
-        StepSpec(key="passenger_boarding", title="Passenger Boarding", requires_done=["baggage"]),
-        StepSpec(key="pushback", title="Pushback", requires_done=["fueling", "baggage", "passenger_boarding"]),
+        StepSpec(key="baggage_belt_arriving", title="Baggage Belt Arriving"),
+        StepSpec(key="baggage", title="Baggage unloading/loading", requires_done=["baggage_belt_arriving"]),
+        StepSpec(key="passenger_boarding", title="Passenger Boarding", requires_done=["passenger_unboarding"]),
+        StepSpec(key="pushback", title="Pushback", requires_done=["fueling", "baggage", "passenger_boarding", "fingerdock_undocked"]),
     ]
 
 

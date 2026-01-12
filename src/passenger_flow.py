@@ -2,9 +2,9 @@
 """
 Passenger flow detection with movement direction analysis.
 Distinguishes between:
-- Deboarding (left-to-right movement)
+- Unboarding (left-to-right movement)
 - Boarding (right-to-left movement)
-- Ground staff preparation (right-to-left before deboarding)
+- Ground staff preparation (right-to-left before unboarding)
 """
 from __future__ import annotations
 
@@ -22,22 +22,28 @@ class PassengerFlowState:
     # track_id -> [(x, y, t_sec), ...]
 
     # Flow statistics
-    left_to_right_count: int = 0  # Deboarding
+    left_to_right_count: int = 0  # Unboarding
     right_to_left_count: int = 0  # Boarding / Ground staff
 
     # Last detection times
-    last_deboarding_detection: Optional[float] = None
+    last_unboarding_detection: Optional[float] = None
     last_boarding_detection: Optional[float] = None
     last_ground_staff_detection: Optional[float] = None
 
     # Task states
-    deboarding_started: bool = False
+    unboarding_started: bool = False
     boarding_started: bool = False
     ground_staff_prep_done: bool = False
 
+    # First detection timestamps for confirmation delay
+    first_unboarding_seen: Optional[float] = None
+    first_boarding_seen: Optional[float] = None
+
     # Timing thresholds
-    deboarding_timeout: float = 50.0  # No movement for 50s -> DONE
+    unboarding_min_duration: float = 20.0  # Must stay ACTIVE for min 20s
+    unboarding_timeout: float = 60.0  # No movement for 60s -> DONE (after min duration)
     boarding_timeout: float = 10.0    # Movement for 10s -> START
+    boarding_min_duration: float = 5.0  # Must stay ACTIVE for min 5s
 
 
 def _get_centroid(bbox: Tuple[int, int, int, int]) -> Tuple[float, float]:
@@ -58,7 +64,7 @@ def _detect_movement_direction(positions: List[Tuple[float, float, float]], min_
     Detect movement direction from position history.
 
     Returns:
-        "left_to_right" - Person moving right (deboarding)
+        "left_to_right" - Person moving right (unboarding)
         "right_to_left" - Person moving left (boarding/ground staff)
         None - Not enough data or stationary
     """
@@ -85,7 +91,7 @@ def _detect_movement_direction(positions: List[Tuple[float, float, float]], min_
     threshold = 5.0  # pixels per frame
 
     if avg_change > threshold:
-        return "left_to_right"  # Deboarding
+        return "left_to_right"  # Unboarding
     elif avg_change < -threshold:
         return "right_to_left"  # Boarding or ground staff
     else:
@@ -97,6 +103,7 @@ def update_passenger_flow(
     roi_passenger_door: Optional[Tuple[int, int, int, int]],
     t_sec: float,
     state: PassengerFlowState,
+    fingerdock_status: str = "UNDOCKED",
 ) -> Dict[str, str]:
     """
     Analyze passenger movement in the passenger_door ROI.
@@ -104,13 +111,13 @@ def update_passenger_flow(
     Returns dict with task statuses:
     {
         "ground_staff_prep": "NOT_STARTED" | "ONGOING" | "DONE",
-        "passenger_deboarding": "NOT_STARTED" | "STARTED" | "ONGOING" | "DONE",
+        "passenger_unboarding": "NOT_STARTED" | "STARTED" | "ONGOING" | "DONE",
         "passenger_boarding": "NOT_STARTED" | "STARTED" | "ONGOING" | "DONE",
     }
     """
     result = {
         "ground_staff_prep": "NOT_STARTED",
-        "passenger_deboarding": "NOT_STARTED",
+        "passenger_unboarding": "NOT_STARTED",
         "passenger_boarding": "NOT_STARTED",
     }
 
@@ -159,7 +166,7 @@ def update_passenger_flow(
         del state.person_positions[track_id]
 
     # Analyze movement directions
-    left_to_right = 0  # Deboarding
+    left_to_right = 0  # Unboarding
     right_to_left = 0  # Boarding or ground staff
 
     for track_id in current_tracks:
@@ -171,19 +178,26 @@ def update_passenger_flow(
         elif direction == "right_to_left":
             right_to_left += 1
 
-    # Update flow counters
-    if left_to_right > 0:
-        state.last_deboarding_detection = t_sec
+    # Count people currently in ROI
+    people_in_roi_count = len(people_in_roi)
 
-    if right_to_left > 0:
-        if state.deboarding_started:
-            state.last_boarding_detection = t_sec
+    # Update flow counters - IGNORE MOVEMENT DIRECTION, use person presence
+    # ONLY when fingerdock is DOCKED
+    # NOTE: For future detection systems with better direction tracking:
+    #       - Left-to-right (L→R) movement = Unboarding (passengers exiting aircraft)
+    #       - Right-to-left (R←L) movement = Boarding (passengers entering aircraft)
+    #       Current implementation uses simple presence detection due to brief visibility windows.
+    if people_in_roi_count > 0 and fingerdock_status == "DOCKED":
+        if not state.unboarding_started:
+            # Before unboarding starts, any person is potential unboarding
+            state.last_unboarding_detection = t_sec
         else:
-            state.last_ground_staff_detection = t_sec
+            # After unboarding started, person is boarding
+            state.last_boarding_detection = t_sec
 
     # ===== GROUND STAFF PREPARATION =====
-    # Right-to-left movement BEFORE deboarding starts = door opening prep
-    if not state.deboarding_started and not state.ground_staff_prep_done:
+    # Right-to-left movement BEFORE unboarding starts = door opening prep
+    if not state.unboarding_started and not state.ground_staff_prep_done:
         if state.last_ground_staff_detection is not None:
             result["ground_staff_prep"] = "ONGOING"
 
@@ -197,41 +211,99 @@ def update_passenger_flow(
         if state.ground_staff_prep_done:
             result["ground_staff_prep"] = "DONE"
 
-    # ===== PASSENGER DEBOARDING =====
-    if state.last_deboarding_detection is not None:
-        if not state.deboarding_started:
-            state.deboarding_started = True
-            result["passenger_deboarding"] = "STARTED"
-        else:
-            # Check if ongoing or done
-            time_since_last = t_sec - state.last_deboarding_detection
+    # ===== PASSENGER UNBOARDING =====
+    # Detect LEFT-TO-RIGHT movement (person exiting aircraft)
+    # CRITICAL: Task can ONLY be active when Fingerdock is DOCKED
+    # CRITICAL: Each person detection adds 20 seconds to activity time
+    # TODO: Future enhancement - get passenger manifest count and auto-mark DONE when count matches
 
-            if time_since_last < state.deboarding_timeout:
-                result["passenger_deboarding"] = "ONGOING"
+    # Check for left-to-right movement AND fingerdock docked
+    if left_to_right > 0 and fingerdock_status == "DOCKED":
+        # Left-to-right movement detected AND fingerdock docked!
+        if state.first_unboarding_seen is None:
+            state.first_unboarding_seen = t_sec
+        # Each detection extends the activity window by 20 seconds
+        state.last_unboarding_detection = t_sec
+
+    # Logic: Task is ONLY active when fingerdock is DOCKED
+    # Each person detection adds 20 seconds of activity
+    # Task is DONE after 60 seconds of no detection (or when passenger count matches manifest)
+    if state.last_unboarding_detection is not None and fingerdock_status == "DOCKED":
+        time_since_last = t_sec - state.last_unboarding_detection
+
+        if not state.unboarding_started:
+            # Start immediately on first person detection
+            state.unboarding_started = True
+            result["passenger_unboarding"] = "STARTED"
+        else:
+            # Already started - stay ACTIVE for 20 seconds after each detection
+            if time_since_last < 20.0:
+                # Within 20 second window from last detection
+                result["passenger_unboarding"] = "ONGOING"
+            elif time_since_last < 60.0:
+                # Between 20-60 seconds - still ONGOING, waiting for next passenger or timeout
+                result["passenger_unboarding"] = "ONGOING"
             else:
-                # No deboarding activity for 50+ seconds -> DONE
-                result["passenger_deboarding"] = "DONE"
+                # No person detected for 60+ seconds -> DONE
+                # TODO: Also mark DONE if passenger count == manifest count
+                result["passenger_unboarding"] = "DONE"
+    elif state.unboarding_started and fingerdock_status != "DOCKED":
+        # Fingerdock undocked while unboarding was active - mark as DONE
+        result["passenger_unboarding"] = "DONE"
+    elif state.last_unboarding_detection is not None and fingerdock_status != "DOCKED":
+        # Was active before, but fingerdock no longer docked
+        result["passenger_unboarding"] = "NOT_STARTED"
     else:
-        result["passenger_deboarding"] = "NOT_STARTED"
+        result["passenger_unboarding"] = "NOT_STARTED"
 
     # ===== PASSENGER BOARDING =====
-    # Can only start AFTER deboarding is done
-    deboarding_done = (
-        state.last_deboarding_detection is not None and
-        t_sec - state.last_deboarding_detection >= state.deboarding_timeout
-    )
+    # Can ONLY start AFTER unboarding is DONE (not just inactive, but actually completed)
+    # CRITICAL: Task can ONLY be active when Fingerdock is DOCKED
+    # CRITICAL: Each person detection adds 20 seconds to activity time
+    # TODO: Future enhancement - get passenger manifest count and auto-mark DONE when count matches
+    unboarding_is_done = (result["passenger_unboarding"] == "DONE")
 
-    if deboarding_done and state.last_boarding_detection is not None:
-        if not state.boarding_started:
-            # Need sustained movement for 10 seconds to confirm boarding
-            if t_sec - state.last_boarding_detection >= state.boarding_timeout:
+    if unboarding_is_done:
+        # Check for right-to-left movement AND fingerdock DOCKED
+        if right_to_left > 0 and fingerdock_status == "DOCKED":
+            # Right-to-left movement detected AND fingerdock docked!
+            if state.first_boarding_seen is None:
+                state.first_boarding_seen = t_sec
+            # Each detection extends the activity window by 20 seconds
+            state.last_boarding_detection = t_sec
+
+        # Logic: Task is ONLY active when fingerdock is DOCKED
+        # Each person detection adds 20 seconds of activity
+        # Task is DONE after 60 seconds of no detection
+        if state.last_boarding_detection is not None and fingerdock_status == "DOCKED":
+            time_since_last_boarding = t_sec - state.last_boarding_detection
+
+            if not state.boarding_started:
+                # Start immediately on first person detection
                 state.boarding_started = True
                 result["passenger_boarding"] = "STARTED"
             else:
-                result["passenger_boarding"] = "NOT_STARTED"
+                # Already started - stay ACTIVE for 20 seconds after each detection
+                if time_since_last_boarding < 20.0:
+                    # Within 20 second window from last detection
+                    result["passenger_boarding"] = "ONGOING"
+                elif time_since_last_boarding < 60.0:
+                    # Between 20-60 seconds - still ONGOING, waiting for next passenger or timeout
+                    result["passenger_boarding"] = "ONGOING"
+                else:
+                    # No person detected for 60+ seconds -> DONE
+                    # TODO: Also mark DONE if passenger count == manifest count
+                    result["passenger_boarding"] = "DONE"
+        elif state.boarding_started and fingerdock_status != "DOCKED":
+            # Fingerdock undocked while boarding was active - mark as DONE
+            result["passenger_boarding"] = "DONE"
+        elif state.last_boarding_detection is not None and fingerdock_status != "DOCKED":
+            # Was active before, but fingerdock no longer docked
+            result["passenger_boarding"] = "NOT_STARTED"
         else:
-            result["passenger_boarding"] = "ONGOING"
+            result["passenger_boarding"] = "NOT_STARTED"
     else:
+        # Unboarding not done yet - boarding cannot start
         result["passenger_boarding"] = "NOT_STARTED"
 
     return result

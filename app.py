@@ -27,7 +27,7 @@ from src.turnaround_sequence import SequenceState, update_sequence
 # ----------------------------
 # Page / theme
 # ----------------------------
-st.set_page_config(page_title="PortHub Royale — Dispatcher Desk", layout="wide")
+st.set_page_config(page_title="Ground Operations Dispatcher Control (GODC)", layout="wide")
 
 st.markdown(
     """
@@ -317,7 +317,7 @@ def render_asset_tagging(dets_df: pd.DataFrame):
 # ----------------------------
 # Header
 # ----------------------------
-st.title("PortHub Royale — Dispatcher Desk")
+st.title("Ground Operations Dispatcher Control (GODC)")
 
 run_id = "run-0001"
 _init_dispatcher_state(run_id)
@@ -381,8 +381,8 @@ with st.sidebar:
     roi_aircraft = st.text_input("aircraft", value="250,120,980,690")
     roi_engine = st.text_input("engine", value="330,300,620,560")
     roi_pushback = st.text_input("pushback", value="120,420,330,680")
-    roi_passenger_door = st.text_input("passenger_door (fingerdock)", value="920,140,1120,380")
-    roi_fingerdock = st.text_input("fingerdock", value="820,160,1080,500")
+    roi_passenger_flow_window = st.text_input("passenger_flow_window", value="1225,428,1545,648")
+    roi_fingerdock_docking_zone = st.text_input("fingerdock_docking_zone", value="1400,705,1650,820")
 
 # Parse ROIs
 rois: Dict[str, Optional[Tuple[int, int, int, int]]] = {
@@ -392,8 +392,8 @@ rois: Dict[str, Optional[Tuple[int, int, int, int]]] = {
     "aircraft": parse_roi(roi_aircraft),
     "engine": parse_roi(roi_engine),
     "pushback": parse_roi(roi_pushback),
-    "passenger_door": parse_roi(roi_passenger_door),
-    "fingerdock": parse_roi(roi_fingerdock),
+    "passenger_flow_window": parse_roi(roi_passenger_flow_window),
+    "fingerdock_docking_zone": parse_roi(roi_fingerdock_docking_zone),
 }
 
 # ----------------------------
@@ -460,12 +460,21 @@ _role_handoff(dets_df, now_t=t_sec)
 from src.passenger_flow import update_passenger_flow
 from src.fingerdock_detection import detect_fingerdock
 
-# Detect passenger movement direction and flow status
+# Detect fingerdock position FIRST (needed for passenger flow logic)
+fingerdock_status = detect_fingerdock(
+    dets_df=dets_df,
+    roi_fingerdock=rois.get("fingerdock_docking_zone"),
+    t_sec=t_sec,
+    state=st.session_state.fingerdock_state,
+)
+
+# Detect passenger movement direction and flow status (uses fingerdock_status)
 passenger_flow_status = update_passenger_flow(
     dets_df=dets_df,
-    roi_passenger_door=rois.get("passenger_door"),
+    roi_passenger_door=rois.get("passenger_flow_window"),
     t_sec=t_sec,
     state=st.session_state.passenger_flow_state,
+    fingerdock_status=fingerdock_status,
 )
 
 # Update task_hist with passenger flow statuses
@@ -484,23 +493,42 @@ for task_key, status in passenger_flow_status.items():
             "last_seen": t_sec
         }
 
-# Detect fingerdock position
-fingerdock_status = detect_fingerdock(
-    dets_df=dets_df,
-    roi_fingerdock=rois.get("fingerdock"),
-    t_sec=t_sec,
-    state=st.session_state.fingerdock_state,
-)
-
 # Update task_hist with fingerdock status
-task_key = "fingerdock"
-if task_key in st.session_state.task_hist:
-    prev_status = st.session_state.task_hist[task_key].get("status")
-    if prev_status != fingerdock_status:
-        st.session_state.task_hist[task_key]["status"] = fingerdock_status
-        st.session_state.task_hist[task_key]["since"] = t_sec
-        _log("task", t_sec, f"{task_key} => {fingerdock_status}")
-    st.session_state.task_hist[task_key]["last_seen"] = t_sec
+if fingerdock_status == "DOCKED":
+    # Mark fingerdock_docked as DONE when docked
+    task_key = "fingerdock_docked"
+    if task_key not in st.session_state.task_hist:
+        st.session_state.task_hist[task_key] = {
+            "status": "DONE",
+            "since": t_sec,
+            "last_seen": t_sec
+        }
+        _log("task", t_sec, f"{task_key} => DONE (fingerdock is DOCKED)")
+    else:
+        st.session_state.task_hist[task_key]["status"] = "DONE"
+        st.session_state.task_hist[task_key]["last_seen"] = t_sec
+
+    # Mark fingerdock_undocked as BLOCKED when docked
+    task_key = "fingerdock_undocked"
+    if task_key in st.session_state.task_hist:
+        prev_status = st.session_state.task_hist[task_key].get("status")
+        if prev_status == "DONE":
+            st.session_state.task_hist[task_key]["status"] = "BLOCKED"
+            _log("task", t_sec, f"{task_key} => BLOCKED (fingerdock is DOCKED)")
+
+elif fingerdock_status == "UNDOCKED":
+    # Mark fingerdock_undocked as DONE so pushback can proceed
+    task_key = "fingerdock_undocked"
+    if task_key not in st.session_state.task_hist:
+        st.session_state.task_hist[task_key] = {
+            "status": "DONE",
+            "since": t_sec,
+            "last_seen": t_sec
+        }
+        _log("task", t_sec, f"{task_key} => DONE (fingerdock is UNDOCKED)")
+    else:
+        st.session_state.task_hist[task_key]["status"] = "DONE"
+        st.session_state.task_hist[task_key]["last_seen"] = t_sec
 else:
     st.session_state.task_hist[task_key] = {
         "status": fingerdock_status,
@@ -542,7 +570,7 @@ alerts_df = compute_alerts_df(
 left, right = st.columns([3.6, 1.7], gap="large")
 
 with left:
-    st.markdown("## Live Camera Feed (frames playback)")
+    st.markdown("## Live Camera Feed (curently frames playback)")
 
     # ----------------------------
     # STATUS DASHBOARD BAR (above live video)
@@ -562,13 +590,10 @@ with left:
     person_count = len(dets_df[dets_df["cls_name"] == "person"]) if dets_df is not None and not dets_df.empty and "cls_name" in dets_df.columns else 0
     vehicle_count = len(dets_df[dets_df["cls_name"].isin(["truck", "car", "bus"])]) if dets_df is not None and not dets_df.empty and "cls_name" in dets_df.columns else 0
 
-    # Sequence progress (percentage)
-    seq_progress = 0
-    if hasattr(st.session_state.seq_state, 'steps') and st.session_state.seq_state.steps:
-        done_count = sum(1 for step in st.session_state.seq_state.steps if step["key"] in st.session_state.seq_state.done_at)
-        seq_progress = int((done_count / len(st.session_state.seq_state.steps)) * 100)
+    # Current frame number for progress display
+    current_frame = idx + 1  # 1-indexed for display
 
-    # STABILITY: Prevent flickering with 5-second minimum display time
+    # STABILITY: Show immediately when task becomes active, hold for 10s after it disappears
     current_active_str = ""
     if active_tasks:
         current_active_str = ", ".join(active_tasks[:2])
@@ -576,20 +601,23 @@ with left:
             current_active_str += f" +{len(active_tasks)-2}"
 
     dash_state = st.session_state.dashboard_state
-    time_since_change = t_sec - dash_state["active_tasks_last_change"]
+    hold_duration = 10.0  # Hold display for 10 seconds after task disappears
 
-    if current_active_str != dash_state["active_tasks_display"]:
-        # State changed
-        if time_since_change >= dash_state["stability_delay"]:
-            # Enough time passed, allow change
-            dash_state["active_tasks_display"] = current_active_str
-            dash_state["active_tasks_last_change"] = t_sec
-    # else: use cached display value for stability
+    if current_active_str:
+        # Task is currently active - show immediately
+        dash_state["active_tasks_display"] = current_active_str
+        dash_state["active_tasks_last_change"] = t_sec
+    else:
+        # No active tasks right now
+        time_since_last_active = t_sec - dash_state["active_tasks_last_change"]
+        if time_since_last_active >= hold_duration:
+            # Enough time passed, clear the display
+            dash_state["active_tasks_display"] = ""
 
     display_active_str = dash_state["active_tasks_display"]
 
     # Dashboard metrics row - FIXED HEIGHT (min-height prevents shifting)
-    dash_cols = st.columns([1.5, 1, 1, 1.2])
+    dash_cols = st.columns([1.5, 1, 1, 1.2], gap="small")
 
     with dash_cols[0]:
         # Active tasks indicator (status bar style) - NO EMOJIS
@@ -623,19 +651,60 @@ with left:
     with dash_cols[2]:
         # Detections count - NO EMOJIS
         st.markdown(f"""
-        <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
-            <div style='color: #9ca3af; font-size: 10px; font-weight: 600; letter-spacing: 0.5px;'>AIRSIDE AIRCRAFT RELEVANT</div>
+        <div style='background: #1f2937; padding: 10px 8px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+            <div style='color: #9ca3af; font-size: 10px; font-weight: 600; letter-spacing: 0.4px; line-height: 1.4;'>AIRSIDE RELEVANT<br/>DETECTIONS</div>
             <div style='color: white; font-size: 14px; font-weight: 700; margin-top: 4px;'>{person_count}P · {vehicle_count}V</div>
         </div>
         """, unsafe_allow_html=True)
 
     with dash_cols[3]:
-        # Sequence progress - NO EMOJIS
-        progress_color = "#10b981" if seq_progress == 100 else ("#3b82f6" if seq_progress > 0 else "#6b7280")
+        # Frame number display - NO EMOJIS
         st.markdown(f"""
         <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
             <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>PROGRESS</div>
-            <div style='color: {progress_color}; font-size: 14px; font-weight: 700; margin-top: 4px;'>{seq_progress}% Complete</div>
+            <div style='color: #3b82f6; font-size: 14px; font-weight: 700; margin-top: 4px;'>Frame {current_frame}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Add spacing between dashboard rows
+    st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+
+    # Second row: Critical Alerts and Overdue Tasks
+    dash_cols_2 = st.columns([1, 1])
+
+    with dash_cols_2[0]:
+        # Critical Alerts
+        critical_count = sum(1 for a in st.session_state.alerts.values() if a.severity == "CRITICAL" and a.status == "ACTIVE")
+        critical_color = "#dc2626" if critical_count > 0 else "#10b981"
+        critical_text = f"{critical_count} Critical" if critical_count > 0 else "No Critical Alerts"
+        st.markdown(f"""
+        <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>CRITICAL ALERTS</div>
+            <div style='color: {critical_color}; font-size: 14px; font-weight: 700; margin-top: 4px;'>{critical_text}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with dash_cols_2[1]:
+        # Overdue Tasks - show task names
+        overdue_tasks = []
+        for step in seq:
+            if step.deadline_sec is not None:
+                if step.key not in st.session_state.seq_state.started_at and t_sec >= step.deadline_sec:
+                    overdue_tasks.append(step.title)
+
+        overdue_color = "#f59e0b" if len(overdue_tasks) > 0 else "#10b981"
+        if len(overdue_tasks) > 0:
+            # Show up to 2 task names
+            overdue_text = ", ".join(overdue_tasks[:2])
+            if len(overdue_tasks) > 2:
+                overdue_text += f" +{len(overdue_tasks)-2}"
+        else:
+            overdue_text = "All On Time"
+
+        st.markdown(f"""
+        <div style='background: #1f2937; padding: 14px; border-radius: 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center;'>
+            <div style='color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;'>OVERDUE TASKS</div>
+            <div style='color: {overdue_color}; font-size: 14px; font-weight: 700; margin-top: 4px;'>{overdue_text}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -718,10 +787,6 @@ with right:
             else:
                 st.info("No alerts to export")
 
-    st.markdown("### Asset tagging (human-in-the-loop)")
-    st.caption("Tag detected vehicles once → tasks become realistic.")
-    render_asset_tagging(dets_df)
-
 # ----------------------------
 # Tabs under frame
 # ----------------------------
@@ -729,7 +794,7 @@ st.markdown("---")
 ops_slot = st.empty()
 
 with ops_slot.container():
-    tabs = st.tabs(["Turnaround Operations", "Alerts", "Event log", "Timeline"])
+    tabs = st.tabs(["Sequence State Machine", "Asset Tagging", "Alerts", "Event Log", "Timeline"])
 
 
     def _seq_step_status(step_key: str, requires: List[str], now_t: float, deadline: Optional[float]) -> Tuple[str, str]:
@@ -823,6 +888,12 @@ with ops_slot.container():
 
 
     with tabs[1]:
+        st.markdown("### Asset Tagging (Human-in-the-Loop)")
+        st.caption("Tag detected vehicles once → tasks become realistic.")
+        render_asset_tagging(dets_df)
+
+
+    with tabs[2]:
         st.markdown("### Alerts")
         st.caption("Unified alert feed: safety + sequence (order/deadline)")
 
@@ -832,8 +903,8 @@ with ops_slot.container():
             st.dataframe(alerts_df, width="stretch")
 
 
-    with tabs[2]:
-        st.markdown("### Event log")
+    with tabs[3]:
+        st.markdown("### Event Log")
         if not st.session_state.event_log:
             st.info("No events yet.")
         else:
@@ -842,7 +913,7 @@ with ops_slot.container():
             st.dataframe(df, width="stretch")
 
 
-    with tabs[3]:
+    with tabs[4]:
         st.markdown("### Timeline")
         rows = []
         for k, h in st.session_state.task_hist.items():

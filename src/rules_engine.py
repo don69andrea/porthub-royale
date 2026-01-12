@@ -11,10 +11,11 @@ import pandas as pd
 # Task catalog
 # ----------------------------
 TASKS: List[Dict[str, str]] = [
-    {"key": "passenger_deboarding", "title": "Passenger Deboarding", "role": "PERSON", "roi": "passenger_door"},
-    {"key": "passenger_boarding", "title": "Passenger Boarding", "role": "PERSON", "roi": "passenger_door"},
+    {"key": "passenger_unboarding", "title": "Passenger Unboarding", "role": "PERSON", "roi": "passenger_flow_window"},
+    {"key": "passenger_boarding", "title": "Passenger Boarding", "role": "PERSON", "roi": "passenger_flow_window"},
     {"key": "fueling", "title": "Fueling", "role": "FUEL_TRUCK", "roi": "fuel"},
     {"key": "gpu", "title": "GPU connected", "role": "GPU_TRUCK", "roi": "nose"},
+    {"key": "baggage_belt_arriving", "title": "Baggage Belt Arriving", "role": "BELT_LOADER", "roi": "belly"},
     {"key": "baggage", "title": "Baggage unloading/loading", "role": "BELT_LOADER", "roi": "belly"},
     {"key": "pushback", "title": "Pushback", "role": "PUSHBACK_TUG", "roi": "aircraft"},
     # Safety tasks (people not tagged; handled as alerts)
