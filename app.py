@@ -249,6 +249,13 @@ def _role_handoff(dets_df: pd.DataFrame, now_t: float, iou_thr: float = 0.20, ma
 
             st.session_state.asset_roles[best_tid] = role
             st.session_state.role_memory[role] = {"track_id": best_tid, "bbox": best_bbox, "last_seen": float(now_t)}
+
+            # Save updated tags to persistent JSON file
+            asset_roles_path = Path("data/asset_roles.json")
+            asset_roles_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(asset_roles_path, "w") as f:
+                json.dump(st.session_state.asset_roles, f, indent=2)
+
             _log("info", now_t, f"Role handoff: {role} moved {old_tid} → {best_tid} (IoU {best_iou:.2f})")
 
 
@@ -267,6 +274,16 @@ ROLE_OPTIONS = {
 
 
 def render_asset_tagging(dets_df: pd.DataFrame):
+    # Show validation warnings first
+    validation_warnings = validate_asset_tagging()
+    if validation_warnings:
+        for warning in validation_warnings:
+            if warning["severity"] == "ERROR":
+                st.error(f"🚨 {warning['message']}")
+            else:
+                st.warning(f"⚠️ {warning['message']}")
+        st.markdown("---")
+
     if dets_df is None or dets_df.empty:
         st.info("No detections in current frame.")
         return
@@ -327,6 +344,42 @@ def render_asset_tagging(dets_df: pd.DataFrame):
                     json.dump(st.session_state.asset_roles, f, indent=2)
 
                 st.rerun()
+
+
+def validate_asset_tagging() -> List[Dict[str, str]]:
+    """
+    Validate current asset tagging and return list of warnings.
+
+    Returns:
+        List of dicts with keys: "severity" ("WARNING" | "ERROR"), "message"
+    """
+    warnings = []
+
+    # Count roles assigned
+    role_counts = {}
+    for tid, role in st.session_state.asset_roles.items():
+        if role and role != "UNASSIGNED":
+            role_counts[role] = role_counts.get(role, 0) + 1
+
+    # Check for duplicate critical roles (only 1 allowed)
+    UNIQUE_ROLES = ["FUEL_TRUCK", "GPU_TRUCK", "PUSHBACK_TUG"]
+    for role in UNIQUE_ROLES:
+        count = role_counts.get(role, 0)
+        if count > 1:
+            warnings.append({
+                "severity": "ERROR",
+                "message": f"Multiple {ROLE_OPTIONS.get(role, role)} tagged ({count}x) - only 1 allowed!"
+            })
+
+    # Check for multiple belt loaders (warning, not error - multiple may be OK)
+    belt_count = role_counts.get("BELT_LOADER", 0)
+    if belt_count > 2:
+        warnings.append({
+            "severity": "WARNING",
+            "message": f"Multiple Belt Loaders tagged ({belt_count}x) - typically only 1-2 needed"
+        })
+
+    return warnings
 
 
 # ----------------------------

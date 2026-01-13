@@ -375,28 +375,49 @@ def draw_overlay(img: Image.Image, dets_df: pd.DataFrame, title: str = "", rois=
             if asset_roles is not None:
                 role = str(asset_roles.get(tid, ""))
 
-            color = (255, 200, 0)
+            # Role-specific colors for better visual distinction
+            ROLE_COLORS = {
+                "FUEL_TRUCK": (255, 69, 0),      # Orange-Red (fuel = fire hazard)
+                "GPU_TRUCK": (0, 191, 255),      # Deep Sky Blue (electricity)
+                "BELT_LOADER": (255, 215, 0),    # Gold (baggage)
+                "PUSHBACK_TUG": (138, 43, 226),  # Blue Violet (pushback)
+                "STAIRS": (50, 205, 50),         # Lime Green (access)
+                "OTHER": (169, 169, 169),        # Dark Gray (other)
+                "UNASSIGNED": (255, 200, 0),     # Orange (unassigned)
+            }
+
+            color = ROLE_COLORS.get(role, (255, 200, 0))  # Default orange for unassigned
             line_width = 3
             if role and role != "UNASSIGNED":
-                color = (0, 220, 255)  # cyan if assigned
                 line_width = 4  # Thicker for assigned vehicles
 
             # Draw bounding box
             d.rectangle((x1, y1, x2, y2), outline=color, width=line_width)
 
-            # Prepare label text
-            txt = f"{label} #{tid} {conf:.2f}"
+            # Prepare label text - show ROLE prominently if assigned
             if role and role != "UNASSIGNED":
-                txt += f" [{role}]"
+                # Convert role key to display name
+                ROLE_DISPLAY = {
+                    "FUEL_TRUCK": "FUEL",
+                    "GPU_TRUCK": "GPU",
+                    "BELT_LOADER": "BAGGAGE",
+                    "PUSHBACK_TUG": "PUSHBACK",
+                    "STAIRS": "STAIRS",
+                    "OTHER": "OTHER",
+                }
+                role_name = ROLE_DISPLAY.get(role, role)
+                txt = f"{role_name} #{tid}"
+            else:
+                txt = f"{label} #{tid}"
 
             # Label background (bigger, more visible)
             label_height = 28
-            label_width = len(txt) * 10 + 10
+            label_width = len(txt) * 11 + 16
             label_y = max(0, y1 - label_height - 2)  # Above box, or at top if no space
 
             # Draw semi-transparent background for label
             d.rectangle((x1, label_y, x1 + label_width, label_y + label_height), fill=(0, 0, 0, 200))
             # Draw text
-            d.text((x1 + 5, label_y + 5), txt, fill=color, font=font)
+            d.text((x1 + 8, label_y + 5), txt, fill=color, font=font)
 
     return out
