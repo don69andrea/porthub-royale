@@ -1,8 +1,10 @@
 # app.py
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 import pandas as pd
@@ -58,7 +60,13 @@ def _init_dispatcher_state(run_id: str):
         st.session_state.run_id = run_id
 
     if "asset_roles" not in st.session_state:
-        st.session_state.asset_roles = {}  # track_id -> role string
+        # Load asset tags from persistent JSON file
+        asset_roles_path = Path("data/asset_roles.json")
+        if asset_roles_path.exists():
+            with open(asset_roles_path, "r") as f:
+                st.session_state.asset_roles = json.load(f)
+        else:
+            st.session_state.asset_roles = {}  # track_id -> role string
 
     # remember last known bbox per tagged ROLE (for role-handoff when track_id changes)
     if "role_memory" not in st.session_state:
@@ -311,6 +319,13 @@ def render_asset_tagging(dets_df: pd.DataFrame):
             if new_role != current:
                 st.session_state.asset_roles[tid] = new_role
                 _log("info", st.session_state.t_sec, f"Asset tagged: id={tid} as {ROLE_OPTIONS.get(new_role, new_role)}")
+
+                # Save asset tags to persistent JSON file
+                asset_roles_path = Path("data/asset_roles.json")
+                asset_roles_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(asset_roles_path, "w") as f:
+                    json.dump(st.session_state.asset_roles, f, indent=2)
+
                 st.rerun()
 
 
@@ -787,16 +802,9 @@ with right:
             else:
                 st.info("No alerts to export")
 
-# ----------------------------
-# Tabs under frame
-# ----------------------------
-st.markdown("---")
-ops_slot = st.empty()
-
-with ops_slot.container():
-    tabs = st.tabs(["Sequence State Machine", "Asset Tagging", "Alerts", "Event Log", "Timeline"])
-
-
+    # ----------------------------
+    # Helper functions for Sequence State Machine
+    # ----------------------------
     def _seq_step_status(step_key: str, requires: List[str], now_t: float, deadline: Optional[float]) -> Tuple[str, str]:
         th = st.session_state.task_hist.get(step_key, {})
         status = str(th.get("status", "NOT_STARTED"))
@@ -830,8 +838,12 @@ with ops_slot.container():
             return "OVERDUE", "#b34b00"
         return "WAITING", "#3b3b3b"
 
+    # ----------------------------
+    # Tabs in right panel (Dispatcher Console)
+    # ----------------------------
+    console_tabs = st.tabs(["Sequence State Machine", "Asset Tagging"])
 
-    with tabs[0]:
+    with console_tabs[0]:
         st.markdown("### Sequence State Machine")
         st.caption("GPU → Fuel → Baggage → Pushback")
 
@@ -886,14 +898,21 @@ with ops_slot.container():
                     th = st.session_state.task_hist.get(step.key, {})
                     st.code(str(th), language="json")
 
-
-    with tabs[1]:
+    with console_tabs[1]:
         st.markdown("### Asset Tagging (Human-in-the-Loop)")
         st.caption("Tag detected vehicles once → tasks become realistic.")
         render_asset_tagging(dets_df)
 
+# ----------------------------
+# Tabs under frame (full width)
+# ----------------------------
+st.markdown("---")
+ops_slot = st.empty()
 
-    with tabs[2]:
+with ops_slot.container():
+    tabs = st.tabs(["Alerts", "Event Log", "Timeline"])
+
+    with tabs[0]:
         st.markdown("### Alerts")
         st.caption("Unified alert feed: safety + sequence (order/deadline)")
 
@@ -902,8 +921,7 @@ with ops_slot.container():
         else:
             st.dataframe(alerts_df, width="stretch")
 
-
-    with tabs[3]:
+    with tabs[1]:
         st.markdown("### Event Log")
         if not st.session_state.event_log:
             st.info("No events yet.")
@@ -912,8 +930,7 @@ with ops_slot.container():
             df = pd.DataFrame(rows).sort_values("t", ascending=False)
             st.dataframe(df, width="stretch")
 
-
-    with tabs[4]:
+    with tabs[2]:
         st.markdown("### Timeline")
         rows = []
         for k, h in st.session_state.task_hist.items():
