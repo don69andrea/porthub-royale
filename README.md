@@ -8,26 +8,26 @@
 
 ---
 
-## 🎯 Project Overview
+##  Project Overview
 
 PortHub Royale is an **AI-powered real-time monitoring system** for aircraft turnaround operations at airports. The system combines **Computer Vision** (YOLOv8), **Multi-Object Tracking** (IoU-based), **Rules Engine**, and **Symbolic Knowledge Representation** to detect safety violations, monitor turnaround sequences, and optimize ground operations.
 
 ### Key Features
 
-- 🔍 **Real-time Object Detection**: YOLOv8 for detecting aircraft, vehicles, and personnel
-- 🎯 **Multi-Object Tracking**: IoU-based tracker with class-aware ID assignment
-- 🚨 **Safety Monitoring**: Automatic alerts for restricted zones (engine area, pushback zone)
-- 📊 **Sequence Management**: Complete turnaround FSM (Fingerdock → Passengers → GPU → Fuel → Baggage → Pushback)
-- 👤 **Human-in-the-Loop**: Asset tagging with persistence, validation, and smart re-tagging
-- 🎨 **Role-Specific Visual Coding**: 7 distinct colors for instant asset identification
-- 👥 **Passenger Flow Monitoring**: Automated boarding/unboarding detection with fingerdock integration
-- 📈 **Dashboard Metrics**: Real-time status overview with 4 key metrics
-- 📤 **Data Export**: JSON/CSV export of alerts, timeline, and analytics
-- 🌐 **Interactive UI**: Streamlit-based dispatcher console with dual-tab layout
+-  **Real-time Object Detection**: YOLOv8 for detecting aircraft, vehicles, and personnel
+-  **Multi-Object Tracking**: IoU-based tracker with class-aware ID assignment
+-  **Safety Monitoring**: Automatic alerts for restricted zones (engine area, pushback zone)
+-  **Sequence Management**: Complete turnaround FSM (Fingerdock → Passengers → GPU → Fuel → Baggage → Pushback)
+-  **Human-in-the-Loop**: Asset tagging with persistence, validation, and smart re-tagging
+-  **Role-Specific Visual Coding**: 7 distinct colors for instant asset identification
+-  **Passenger Flow Monitoring**: Automated boarding/unboarding detection with fingerdock integration
+-  **Dashboard Metrics**: Real-time status overview with 4 key metrics
+-  **Data Export**: JSON/CSV export of alerts, timeline, and analytics
+-  **Interactive UI**: Streamlit-based dispatcher console with dual-tab layout
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 ### Hybrid AI Approach
 
@@ -80,7 +80,7 @@ PortHub Royale is an **AI-powered real-time monitoring system** for aircraft tur
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 
@@ -174,7 +174,7 @@ streamlit run app.py
 
 ---
 
-## 🎨 New in Version 2.0 (January 2026)
+##  New in Version 2.0 (January 2026)
 
 ### Asset Tagging Enhancements
 - ✅ **JSON Persistence**: Tags saved to `data/asset_roles.json`, preserved across restarts (100% retention)
@@ -219,7 +219,7 @@ pytest tests/ --cov=src --cov-report=html
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 porthub_turnaround_prototype/
@@ -248,7 +248,7 @@ porthub_turnaround_prototype/
 
 ---
 
-## 🔧 Configuration
+##  Configuration
 
 Edit `config/settings.yaml` to customize:
 
@@ -298,7 +298,7 @@ sequence:
 
 ---
 
-## 🎓 Research Context
+##  Research Context
 
 This prototype demonstrates a **Hybrid AI** approach combining:
 
@@ -315,7 +315,7 @@ This prototype demonstrates a **Hybrid AI** approach combining:
 
 ---
 
-## 🚧 Known Limitations
+## ! Known Limitations
 
 1. **Camera Angle Dependency**: ROIs are hardcoded for specific camera position
 2. **Occlusion Handling**: Tracking may fail with heavy occlusions
@@ -324,7 +324,7 @@ This prototype demonstrates a **Hybrid AI** approach combining:
 
 ---
 
-## 🛣️ Roadmap
+##  Roadmap
 
 ### Phase 1: Core System ✅ (Completed)
 - [x] YOLOv8 detection
@@ -355,18 +355,18 @@ This prototype demonstrates a **Hybrid AI** approach combining:
 
 ---
 
-## 👥 Team
+##  Team
 
 **MAKEathon FHNW 2025**
 
-- **Lead Developer**: Andrea Petretta
+- **Lead Developer**: Andrea Petretta / Sheyla Sampietro
 - **Supervisor**: Dr. Emanuele Laurenzi
 - **Institution**: FHNW University of Applied Sciences Northwestern Switzerland
-- **School**: School of Business, Institute for Information Systems
+- **School**: School of Business
 
 ---
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
@@ -381,22 +381,15 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-## 📞 Contact
+## Contact
 
 For questions or collaboration:
+Team PortHub Royale - Andrea J-M Petretta / Claudio Schwager / Ramiro Gonzales - Sanchez / Nicolas Louis Landima - Lardinois / Sheyla Nashelly Sampietro
 - **Email**: andrea.petretta@students.fhnw.ch
 - **GitHub**: [Project Repository](https://github.com/yourusername/porthub-turnaround-prototype)
 - **Demo Date**: January 23, 2026 at 10:00 AM
 - **Location**: FHNW Campus Olten
 
----
-
-## 🎉 Demo & Poster Fair
-
-**Date**: January 23, 2026 at 10:00 AM
-**Location**: FHNW Campus Olten
-
-Come see our live demonstration!
 
 ---
 
