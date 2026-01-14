@@ -53,7 +53,7 @@ def _iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
 
 
 class SimpleIoUTracker:
-    def __init__(self, iou_match: float = 0.35, max_missed: int = 10):
+    def __init__(self, iou_match: float = 0.35, max_missed: int = 6):
         self.iou_match = iou_match
         self.max_missed = max_missed
         self.next_id = 1

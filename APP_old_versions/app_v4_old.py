@@ -60,50 +60,28 @@ def _init_dispatcher_state(run_id: str):
         st.session_state.run_id = run_id
 
     if "asset_roles" not in st.session_state:
-        st.session_state.asset_roles = {}  # track_id -> role string
-
-    # Load persistent tags from JSON (enhanced format with reference bboxes)
-    if "persistent_tags" not in st.session_state:
+        # Load asset tags from persistent JSON file
         asset_roles_path = Path("data/asset_roles.json")
-        role_refs_path = Path("data/role_references.json")
-
-        # Load track_id -> role mappings
         if asset_roles_path.exists():
             try:
                 with open(asset_roles_path, "r") as f:
                     loaded = json.load(f)
-                    st.session_state.persistent_tags = {int(k): v for k, v in loaded.items()}
+                    # Convert string keys to integers (JSON stores dict keys as strings)
+                    st.session_state.asset_roles = {int(k): v for k, v in loaded.items()}
+                    # Store loading info for display
                     st.session_state._tags_loaded = True
-                    st.session_state._tags_count = len(st.session_state.persistent_tags)
+                    st.session_state._tags_count = len(st.session_state.asset_roles)
             except Exception as e:
-                st.session_state.persistent_tags = {}
+                st.session_state.asset_roles = {}
                 st.session_state._tags_loaded = False
                 st.session_state._tags_load_error = str(e)
         else:
-            st.session_state.persistent_tags = {}
+            st.session_state.asset_roles = {}  # track_id -> role string
             st.session_state._tags_loaded = False
-
-        # Load role -> reference_bbox mappings (for tag recovery)
-        if role_refs_path.exists():
-            try:
-                with open(role_refs_path, "r") as f:
-                    refs = json.load(f)
-                    # Convert bbox lists back to tuples
-                    st.session_state.role_references = {
-                        role: tuple(bbox) for role, bbox in refs.items()
-                    }
-            except Exception as e:
-                st.session_state.role_references = {}
-        else:
-            st.session_state.role_references = {}
 
     # remember last known bbox per tagged ROLE (for role-handoff when track_id changes)
     if "role_memory" not in st.session_state:
         st.session_state.role_memory = {}  # role -> {"track_id": int, "bbox": (x1,y1,x2,y2), "last_seen": float}
-
-    # Tag recovery state (for auto-recovering lost tags on app restart)
-    if "tag_recovery_active" not in st.session_state:
-        st.session_state.tag_recovery_active = (len(st.session_state.get("persistent_tags", {})) > 0)
 
     if "task_hist" not in st.session_state:
         st.session_state.task_hist = {}  # task -> {"status","since","last_seen"}
@@ -125,14 +103,14 @@ def _init_dispatcher_state(run_id: str):
 
     # tracker (make it more tolerant)
     if "tracker" not in st.session_state:
-        st.session_state.tracker = SimpleIoUTracker()  # Uses defaults: iou_match=0.35, max_missed=6
+        st.session_state.tracker = SimpleIoUTracker(iou_match=0.25, max_missed=40)
 
     # Sequence state machine
     if "seq_state" not in st.session_state:
         st.session_state.seq_state = SequenceState()
 
     if "seq_done_sensitivity" not in st.session_state:
-        st.session_state.seq_done_sensitivity = 3.5
+        st.session_state.seq_done_sensitivity = 6.0
 
     if "t_sec" not in st.session_state:
         st.session_state.t_sec = 0.0
@@ -223,32 +201,9 @@ def _taggable_assets_df(dets_df: pd.DataFrame) -> pd.DataFrame:
     return dets_df.copy()
 
 
-def _save_persistent_tags():
-    """
-    Save both asset_roles and role_references to persistent JSON files.
-    This allows tags to survive app restarts.
-    """
-    # Save track_id -> role mapping
-    asset_roles_path = Path("data/asset_roles.json")
-    asset_roles_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(asset_roles_path, "w") as f:
-        json.dump(st.session_state.asset_roles, f, indent=2)
-
-    # Save role -> reference_bbox mapping (for tag recovery)
-    if "role_references" in st.session_state and st.session_state.role_references:
-        role_refs_path = Path("data/role_references.json")
-        # Convert tuples to lists for JSON serialization
-        refs_for_json = {
-            role: list(bbox) for role, bbox in st.session_state.role_references.items()
-        }
-        with open(role_refs_path, "w") as f:
-            json.dump(refs_for_json, f, indent=2)
-
-
 def _update_role_memory(dets_df: pd.DataFrame, now_t: float):
     """
     Update memory bbox for roles that are currently tagged and visible in this frame.
-    Also updates role_references (persistent reference bboxes for tag recovery).
     Now supports both vehicles and persons.
     """
     assets = _taggable_assets_df(dets_df)
@@ -260,98 +215,14 @@ def _update_role_memory(dets_df: pd.DataFrame, now_t: float):
         if role in ("UNASSIGNED", "", None):
             continue
         if tid in by_tid:
-            bbox = by_tid[tid]
             st.session_state.role_memory[role] = {
                 "track_id": int(tid),
-                "bbox": bbox,
+                "bbox": by_tid[tid],
                 "last_seen": float(now_t),
             }
 
-            # Update role reference (for persistent tag recovery)
-            # Use exponential moving average to smooth out bbox changes
-            if "role_references" not in st.session_state:
-                st.session_state.role_references = {}
 
-            if role in st.session_state.role_references:
-                # Smooth update (80% old, 20% new)
-                old_bbox = st.session_state.role_references[role]
-                new_bbox = tuple(
-                    0.8 * old_bbox[i] + 0.2 * bbox[i]
-                    for i in range(4)
-                )
-                st.session_state.role_references[role] = new_bbox
-            else:
-                # First time seeing this role
-                st.session_state.role_references[role] = bbox
-
-
-def _recover_lost_tags(dets_df: pd.DataFrame, now_t: float, iou_thr: float = 0.20):
-    """
-    AUTO TAG RECOVERY: Try to recover tags from previous session using reference bboxes.
-    This runs continuously to recover tags that were saved but lost due to tracker reset.
-
-    Uses role_references (persistent bboxes) to match new detections to old roles.
-    """
-    if "role_references" not in st.session_state or not st.session_state.role_references:
-        return
-
-    if "persistent_tags" not in st.session_state or not st.session_state.persistent_tags:
-        return
-
-    assets = _taggable_assets_df(dets_df)
-    if assets.empty or "track_id" not in assets.columns:
-        return
-
-    # Get roles that are saved but not currently assigned
-    saved_roles = set()
-    for tid, role in st.session_state.persistent_tags.items():
-        if role and role != "UNASSIGNED":
-            saved_roles.add(role)
-
-    current_roles = set()
-    for tid, role in st.session_state.asset_roles.items():
-        if role and role != "UNASSIGNED":
-            current_roles.add(role)
-
-    missing_roles = saved_roles - current_roles
-
-    if not missing_roles:
-        return  # All saved roles are already recovered
-
-    # Find unassigned detections
-    assigned_tids = set(tid for tid, role in st.session_state.asset_roles.items() if role and role != "UNASSIGNED")
-    candidates = assets[~assets["track_id"].isin(assigned_tids)].copy()
-
-    if candidates.empty:
-        return
-
-    # Try to match each missing role to a candidate detection
-    for role in missing_roles:
-        if role not in st.session_state.role_references:
-            continue
-
-        ref_bbox = st.session_state.role_references[role]
-        best_iou = 0.0
-        best_tid = None
-
-        for _, r in candidates.iterrows():
-            bbox = tuple(r["bbox_xyxy"])
-            iou = _bbox_iou(ref_bbox, bbox)
-
-            if iou > best_iou:
-                best_iou = iou
-                best_tid = int(r["track_id"])
-
-        if best_tid is not None and best_iou >= iou_thr:
-            # Recover the tag!
-            st.session_state.asset_roles[best_tid] = role
-            _log("info", now_t, f"🔄 TAG RECOVERED: {role} → track_id={best_tid} (IoU={best_iou:.2f})")
-
-            # Remove from candidates so it's not matched twice
-            candidates = candidates[candidates["track_id"] != best_tid]
-
-
-def _role_handoff(dets_df: pd.DataFrame, now_t: float, iou_thr: float = 0.15, max_age_sec: float = 8.0):
+def _role_handoff(dets_df: pd.DataFrame, now_t: float, iou_thr: float = 0.20, max_age_sec: float = 8.0):
     """
     If a tagged role disappears because the track_id changed, try to re-attach that role
     to the best matching new track based on bbox IoU against recent role_memory.
@@ -371,25 +242,12 @@ def _role_handoff(dets_df: pd.DataFrame, now_t: float, iou_thr: float = 0.15, ma
         if r and r != "UNASSIGNED":
             present_roles.add(r)
 
-    # DEBUG: Log handoff state for GPU_OPERATOR
-    if "GPU_OPERATOR" in st.session_state.role_memory:
-        _log("debug", now_t, f"[HANDOFF DEBUG] GPU_OPERATOR in memory: {st.session_state.role_memory['GPU_OPERATOR']}")
-        _log("debug", now_t, f"[HANDOFF DEBUG] Present roles: {present_roles}")
-        _log("debug", now_t, f"[HANDOFF DEBUG] Present track_ids: {present_tids}")
-
     # candidates: unassigned assets (vehicles + persons) in this frame
     cand = assets.copy()
     cand["track_id"] = cand["track_id"].astype(int)
 
     assigned_tids = [tid for tid, role in st.session_state.asset_roles.items() if role and role != "UNASSIGNED"]
     cand = cand[~cand["track_id"].isin(assigned_tids)].copy()
-
-    # DEBUG: Log candidates for GPU_OPERATOR
-    if "GPU_OPERATOR" in st.session_state.role_memory and "GPU_OPERATOR" not in present_roles:
-        _log("debug", now_t, f"[HANDOFF DEBUG] Candidates for handoff: {len(cand)} unassigned detections")
-        if not cand.empty:
-            _log("debug", now_t, f"[HANDOFF DEBUG] Candidate track_ids: {cand['track_id'].tolist()}")
-
     if cand.empty:
         return
 
@@ -398,12 +256,7 @@ def _role_handoff(dets_df: pd.DataFrame, now_t: float, iou_thr: float = 0.15, ma
             continue
         if role in present_roles:
             continue
-
-        age_sec = float(now_t) - float(mem.get("last_seen", -1e9))
-        if age_sec > float(max_age_sec):
-            # DEBUG: Log stale memory
-            if role == "GPU_OPERATOR":
-                _log("debug", now_t, f"[HANDOFF DEBUG] GPU_OPERATOR memory too old: {age_sec:.1f}s > {max_age_sec}s")
+        if float(now_t) - float(mem.get("last_seen", -1e9)) > float(max_age_sec):
             continue
 
         mem_bbox = tuple(mem["bbox"])
@@ -411,26 +264,13 @@ def _role_handoff(dets_df: pd.DataFrame, now_t: float, iou_thr: float = 0.15, ma
         best_tid = None
         best_bbox = None
 
-        # DEBUG: Log handoff attempt
-        if role == "GPU_OPERATOR":
-            _log("debug", now_t, f"[HANDOFF DEBUG] Attempting handoff for GPU_OPERATOR (age={age_sec:.1f}s, mem_bbox={mem_bbox})")
-
         for _, r in cand.iterrows():
             bbox = tuple(r["bbox_xyxy"])
             i = _bbox_iou(mem_bbox, bbox)
-
-            # DEBUG: Log IoU calculations
-            if role == "GPU_OPERATOR":
-                _log("debug", now_t, f"[HANDOFF DEBUG] Candidate track_id={int(r['track_id'])}, bbox={bbox}, IoU={i:.3f}")
-
             if i > best_iou:
                 best_iou = i
                 best_tid = int(r["track_id"])
                 best_bbox = bbox
-
-        # DEBUG: Log best match
-        if role == "GPU_OPERATOR":
-            _log("debug", now_t, f"[HANDOFF DEBUG] Best match: track_id={best_tid}, IoU={best_iou:.3f}, threshold={iou_thr}")
 
         if best_tid is not None and best_iou >= float(iou_thr):
             old_tid = int(mem.get("track_id", -1))
@@ -466,7 +306,6 @@ ROLE_OPTIONS = {
     "GPU_OPERATOR": "GPU Operator (Person)",
     "FUEL_OPERATOR": "Fuel Operator (Person)",
     "BAGGAGE_HANDLER": "Baggage Handler (Person)",
-    "WHEEL_CHOCKS_CREW": "Wheel Chocks Crew (Person)",
     "ENGINE_SAFETY_CREW": "Engine Safety Crew (Person)",
     "GROUND_CREW": "Ground Crew (Person)",
     "PASSENGER": "Passenger (Person)",
@@ -475,7 +314,7 @@ ROLE_OPTIONS = {
 
 # Define which roles are for vehicles vs persons
 VEHICLE_ROLES = {"FUEL_TRUCK", "GPU_TRUCK", "BELT_LOADER", "PUSHBACK_TUG", "STAIRS", "OTHER"}
-PERSON_ROLES = {"GPU_OPERATOR", "FUEL_OPERATOR", "BAGGAGE_HANDLER", "WHEEL_CHOCKS_CREW", "ENGINE_SAFETY_CREW", "GROUND_CREW", "PASSENGER"}
+PERSON_ROLES = {"GPU_OPERATOR", "FUEL_OPERATOR", "BAGGAGE_HANDLER", "ENGINE_SAFETY_CREW", "GROUND_CREW", "PASSENGER"}
 
 
 def render_asset_tagging(dets_df: pd.DataFrame):
@@ -490,44 +329,33 @@ def render_asset_tagging(dets_df: pd.DataFrame):
             else:
                 st.warning(f"⚠️ {warning['message']}")
 
-        # Add buttons to handle errors
+        # Add button to clear mismatched tags if there are errors
         if has_errors and dets_df is not None and not dets_df.empty:
-            st.warning("⚠️ **Track ID mismatch detected!** This happens when you restart the app - track IDs get reassigned. Clear the mismatched tags and re-tag them, OR continue without fixing (tasks won't work correctly).")
+            if st.button("🗑️ Clear Mismatched Tags", type="secondary"):
+                # Remove tags for track_ids that have mismatches
+                if "track_id" in dets_df.columns and "cls_name" in dets_df.columns:
+                    to_remove = []
+                    for tid, role in st.session_state.asset_roles.items():
+                        if role == "UNASSIGNED" or not role:
+                            continue
+                        matching = dets_df[dets_df["track_id"] == tid]
+                        if matching.empty:
+                            continue
+                        cls_name = matching.iloc[0]["cls_name"]
+                        is_person = (cls_name == "person")
+                        is_vehicle = (cls_name in ["truck", "car", "bus", "train"])
+                        if (is_person and role in VEHICLE_ROLES) or (is_vehicle and role in PERSON_ROLES):
+                            to_remove.append(tid)
 
-            col1, col2 = st.columns(2)
+                    for tid in to_remove:
+                        del st.session_state.asset_roles[tid]
 
-            with col1:
-                if st.button("🗑️ Clear Mismatched Tags", type="primary", use_container_width=True):
-                    # Remove tags for track_ids that have mismatches
-                    if "track_id" in dets_df.columns and "cls_name" in dets_df.columns:
-                        to_remove = []
-                        for tid, role in list(st.session_state.asset_roles.items()):
-                            if role == "UNASSIGNED" or not role:
-                                continue
-                            matching = dets_df[dets_df["track_id"] == tid]
-                            if matching.empty:
-                                continue
-                            cls_name = matching.iloc[0]["cls_name"]
-                            is_person = (cls_name == "person")
-                            is_vehicle = (cls_name in ["truck", "car", "bus", "train"])
-                            if (is_person and role in VEHICLE_ROLES) or (is_vehicle and role in PERSON_ROLES):
-                                to_remove.append(tid)
+                    # Save cleaned tags
+                    asset_roles_path = Path("data/asset_roles.json")
+                    with open(asset_roles_path, "w") as f:
+                        json.dump(st.session_state.asset_roles, f, indent=2)
 
-                        # Remove the mismatched tags
-                        for tid in to_remove:
-                            if tid in st.session_state.asset_roles:
-                                del st.session_state.asset_roles[tid]
-
-                        # Save cleaned tags (with reference bboxes)
-                        _save_persistent_tags()
-
-                        st.success(f"✓ Removed {len(to_remove)} mismatched tag(s)")
-                        st.rerun()
-
-            with col2:
-                if st.button("▶️ Continue Anyway", type="secondary", use_container_width=True):
-                    # Force playback to resume even with errors
-                    st.session_state.playback_running = True
+                    st.success(f"✓ Removed {len(to_remove)} mismatched tag(s)")
                     st.rerun()
 
         st.markdown("---")
@@ -603,8 +431,11 @@ def render_asset_tagging(dets_df: pd.DataFrame):
                     st.session_state.asset_roles[tid] = new_role
                     _log("info", st.session_state.t_sec, f"Asset tagged: id={tid} as {ROLE_OPTIONS.get(new_role, new_role)}")
 
-                    # Save asset tags AND reference bboxes to persistent JSON files
-                    _save_persistent_tags()
+                    # Save asset tags to persistent JSON file
+                    asset_roles_path = Path("data/asset_roles.json")
+                    asset_roles_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(asset_roles_path, "w") as f:
+                        json.dump(st.session_state.asset_roles, f, indent=2)
 
                     st.rerun()
     else:
@@ -643,8 +474,11 @@ def render_asset_tagging(dets_df: pd.DataFrame):
                     st.session_state.asset_roles[tid] = new_role
                     _log("info", st.session_state.t_sec, f"Person tagged: id={tid} as {ROLE_OPTIONS.get(new_role, new_role)}")
 
-                    # Save asset tags AND reference bboxes to persistent JSON files
-                    _save_persistent_tags()
+                    # Save asset tags to persistent JSON file
+                    asset_roles_path = Path("data/asset_roles.json")
+                    asset_roles_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(asset_roles_path, "w") as f:
+                        json.dump(st.session_state.asset_roles, f, indent=2)
 
                     st.rerun()
     else:
@@ -752,11 +586,7 @@ with st.sidebar:
     # Show tag loading status
     if hasattr(st.session_state, '_tags_loaded'):
         if st.session_state._tags_loaded:
-            saved_count = len(st.session_state.get("persistent_tags", {}))
-            active_count = len([r for r in st.session_state.asset_roles.values() if r and r != "UNASSIGNED"])
-            st.success(f"Loaded {saved_count} saved tags")
-            if active_count > 0:
-                st.info(f"🔄 {active_count} tags currently active (auto-recovered)")
+            st.success(f"Loaded {st.session_state._tags_count} asset tags")
         elif hasattr(st.session_state, '_tags_load_error'):
             st.error(f"Error loading tags: {st.session_state._tags_load_error}")
         else:
@@ -787,7 +617,7 @@ with st.sidebar:
             st.session_state.task_counters = {}
             st.session_state.alerts = {}
             st.session_state.seq_state = SequenceState()
-            st.session_state.tracker = SimpleIoUTracker()  # Use defaults: iou_match=0.35, max_missed=6
+            st.session_state.tracker = SimpleIoUTracker(iou_match=0.25, max_missed=40)
 
             # keep tagging? (YES) — but clear role memory for clean handoff behavior
             st.session_state.role_memory = {}
@@ -797,7 +627,7 @@ with st.sidebar:
 
     st.header("Detection")
     demo_mode = st.checkbox("Demo Mode (no ML deps)", value=False)
-    conf = st.slider("Confidence", 0.05, 0.95, 0.20, 0.01)  # Lower for better person detection
+    conf = st.slider("Confidence", 0.05, 0.95, 0.20, 0.01)
     iou = st.slider("IoU", 0.05, 0.95, 0.50, 0.01)
     weights = st.text_input("YOLO weights", value="yolov8n.pt")
 
@@ -811,58 +641,22 @@ with st.sidebar:
         default=["airplane", "person", "truck", "car", "bus", "train"],
     )
 
-    roi_nose = st.text_input("nose", value="840,610,1080,770")  # GPU cable connection area (left side)
-    roi_wheel_chocks = st.text_input("wheel_chocks", value="848,689,935,753")  # Wheel chocks at front gear
-    roi_fuel = st.text_input("fuel", value="620,170,980,520")  # Fuel truck area
-    roi_baggage_front = st.text_input("baggage_front", value="527,538,785,694")  # Baggage belt front door
-    roi_baggage_rear = st.text_input("baggage_rear", value="746,284,862,366")  # Baggage belt rear door
-    roi_aircraft = st.text_input("aircraft", value="250,120,980,690")  # Aircraft area
-    roi_engine_right = st.text_input("engine_right", value="612,539,720,617")  # Right engine zone (safety pylon)
-    roi_engine_left = st.text_input("engine_left", value="1080,540,1183,631")  # Left engine zone (safety pylon)
-    roi_pushback = st.text_input("pushback", value="773,666,1056,923")  # Pushback vehicle area
-    roi_passenger_flow_window = st.text_input("passenger_flow_window", value="1225,428,1545,648")  # Passenger door window
-    roi_fingerdock_docking_zone = st.text_input("fingerdock_docking_zone", value="1400,705,1650,820")  # Fingerdock docking zone
-
-    # DEBUG PANEL
-    st.header("Debug Info")
-    show_debug = st.checkbox("Show Debug Panel", value=True)
-    if show_debug:
-        st.markdown("#### Tagged Assets")
-        if st.session_state.asset_roles:
-            for tid, role in sorted(st.session_state.asset_roles.items()):
-                if role and role != "UNASSIGNED":
-                    st.caption(f"ID {tid}: {ROLE_OPTIONS.get(role, role)}")
-        else:
-            st.caption("No assets tagged")
-
-        st.markdown("#### Role Memory")
-        if "role_memory" in st.session_state and st.session_state.role_memory:
-            for role, mem in st.session_state.role_memory.items():
-                if role and role != "UNASSIGNED":
-                    age = st.session_state.t_sec - mem.get("last_seen", 0) if "t_sec" in st.session_state else 0
-                    st.caption(f"{ROLE_OPTIONS.get(role, role)}: ID {mem.get('track_id', '?')} (age: {age:.1f}s)")
-        else:
-            st.caption("No role memory")
-
-        st.markdown("#### GPU Task Status")
-        if "task_hist" in st.session_state and "gpu" in st.session_state.task_hist:
-            gpu_task = st.session_state.task_hist["gpu"]
-            st.caption(f"Status: {gpu_task.get('status', 'NOT_STARTED')}")
-            st.caption(f"Since: {gpu_task.get('since', 'N/A')}")
-            st.caption(f"Last seen: {gpu_task.get('last_seen', 'N/A')}")
-        else:
-            st.caption("GPU task not initialized")
+    roi_nose = st.text_input("nose", value="260,250,620,520")
+    roi_fuel = st.text_input("fuel", value="620,170,980,520")
+    roi_belly = st.text_input("belly", value="250,320,520,650")
+    roi_aircraft = st.text_input("aircraft", value="250,120,980,690")
+    roi_engine = st.text_input("engine", value="330,300,620,560")
+    roi_pushback = st.text_input("pushback", value="120,420,330,680")
+    roi_passenger_flow_window = st.text_input("passenger_flow_window", value="1225,428,1545,648")
+    roi_fingerdock_docking_zone = st.text_input("fingerdock_docking_zone", value="1400,705,1650,820")
 
 # Parse ROIs
 rois: Dict[str, Optional[Tuple[int, int, int, int]]] = {
     "nose": parse_roi(roi_nose),
-    "wheel_chocks": parse_roi(roi_wheel_chocks),
     "fuel": parse_roi(roi_fuel),
-    "baggage_front": parse_roi(roi_baggage_front),
-    "baggage_rear": parse_roi(roi_baggage_rear),
+    "belly": parse_roi(roi_belly),
     "aircraft": parse_roi(roi_aircraft),
-    "engine_right": parse_roi(roi_engine_right),
-    "engine_left": parse_roi(roi_engine_left),
+    "engine": parse_roi(roi_engine),
     "pushback": parse_roi(roi_pushback),
     "passenger_flow_window": parse_roi(roi_passenger_flow_window),
     "fingerdock_docking_zone": parse_roi(roi_fingerdock_docking_zone),
@@ -924,11 +718,6 @@ if debug_det and dets_df is not None and not dets_df.empty:
 
 # keep tagging stable even if track_ids change
 _update_role_memory(dets_df, now_t=t_sec)
-
-# Try to recover lost tags from previous session (runs continuously)
-_recover_lost_tags(dets_df, now_t=t_sec)
-
-# Standard role handoff for within-session track ID changes
 _role_handoff(dets_df, now_t=t_sec)
 
 # ----------------------------

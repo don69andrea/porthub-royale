@@ -10,16 +10,18 @@ import pandas as pd
 # ----------------------------
 # Task catalog
 # ----------------------------
-TASKS: List[Dict[str, str]] = [
+TASKS: List[Dict[str, Any]] = [
     {"key": "passenger_unboarding", "title": "Passenger Unboarding", "role": "PERSON", "roi": "passenger_flow_window"},
     {"key": "passenger_boarding", "title": "Passenger Boarding", "role": "PERSON", "roi": "passenger_flow_window"},
+    {"key": "wheel_chocks", "title": "Wheel Chocks Placed", "role": "WHEEL_CHOCKS_CREW", "roi": "wheel_chocks"},
     {"key": "fueling", "title": "Fueling", "role": "FUEL_TRUCK", "roi": "fuel"},
-    {"key": "gpu", "title": "GPU connected", "role": "GPU_TRUCK", "roi": "nose"},
-    {"key": "baggage_belt_arriving", "title": "Baggage Belt Arriving", "role": "BELT_LOADER", "roi": "belly"},
-    {"key": "baggage", "title": "Baggage unloading/loading", "role": "BELT_LOADER", "roi": "belly"},
-    {"key": "pushback", "title": "Pushback", "role": "PUSHBACK_TUG", "roi": "aircraft"},
-    # Safety tasks (people not tagged; handled as alerts)
-    {"key": "safety_engine_clear", "title": "Safety: Engine zone clear", "role": "PERSON", "roi": "engine"},
+    {"key": "gpu", "title": "GPU connected", "role": ["GPU_TRUCK", "GPU_OPERATOR"], "roi": "nose"},  # Accept truck OR operator
+    {"key": "baggage_front", "title": "Baggage Front Door", "role": "BELT_LOADER", "roi": "baggage_front"},
+    {"key": "baggage_rear", "title": "Baggage Rear Door", "role": "BELT_LOADER", "roi": "baggage_rear"},
+    {"key": "pushback", "title": "Pushback", "role": "PUSHBACK_TUG", "roi": "pushback"},
+    # Safety tasks: ENGINE_SAFETY_CREW places pylons at engines
+    {"key": "safety_engine_right_clear", "title": "Safety: Right Engine Pylon", "role": "ENGINE_SAFETY_CREW", "roi": "engine_right"},
+    {"key": "safety_engine_left_clear", "title": "Safety: Left Engine Pylon", "role": "ENGINE_SAFETY_CREW", "roi": "engine_left"},
     {"key": "safety_pushback_clear", "title": "Safety: Pushback area clear", "role": "PERSON", "roi": "pushback"},
     {"key": "safety_airside_presence", "title": "Safety: Airside presence", "role": "PERSON", "roi": "aircraft"},
 ]
@@ -113,32 +115,78 @@ def eval_tasks(
     task_counters: Dict[str, Dict[str, Any]],
     log: Callable[[str, float, str], None],
 ) -> None:
-    def any_role_in_roi(role: str, roi_key: str) -> bool:
+    def any_role_in_roi(role, roi_key: str, exclude_roles: List[str] = None) -> bool:
+        """
+        Check if role(s) are present in ROI.
+        role can be a string or a list of strings (any match returns True).
+        """
         roi = rois.get(roi_key)
         if roi is None or dets_df is None or dets_df.empty:
             return False
 
-        # People not tagged: use cls_name
-        if role == "PERSON":
-            if "cls_name" not in dets_df.columns:
-                return False
-            people = dets_df[dets_df["cls_name"] == "person"]
-            for _, rr in people.iterrows():
-                if _in_roi(tuple(rr["bbox_xyxy"]), roi):
-                    return True
-            return False
+        # Support multiple roles (e.g., ["GPU_TRUCK", "GPU_OPERATOR"])
+        roles_to_check = [role] if isinstance(role, str) else role
 
-        tagged_ids = [tid for tid, r in asset_roles.items() if r == role]
-        if not tagged_ids:
-            return False
+        for r in roles_to_check:
+            # People not tagged: use cls_name (but exclude authorized roles)
+            if r == "PERSON":
+                if "cls_name" not in dets_df.columns:
+                    continue
+                people = dets_df[dets_df["cls_name"] == "person"]
 
-        sub = dets_df[dets_df["track_id"].isin(tagged_ids)]
-        if sub.empty:
-            return False
+                # Exclude persons with authorized roles (e.g., ENGINE_SAFETY_CREW in engine zone)
+                if exclude_roles:
+                    excluded_track_ids = [tid for tid, role_name in asset_roles.items() if role_name in exclude_roles]
+                    if excluded_track_ids:
+                        people = people[~people["track_id"].isin(excluded_track_ids)]
 
-        for _, rr in sub.iterrows():
-            if _in_roi(tuple(rr["bbox_xyxy"]), roi):
-                return True
+                for _, rr in people.iterrows():
+                    if _in_roi(tuple(rr["bbox_xyxy"]), roi):
+                        return True
+
+            else:
+                # Tagged role (vehicle or person)
+                tagged_ids = [int(tid) for tid, role_name in asset_roles.items() if role_name == r]
+
+                # DEBUG: Log for GPU role detection
+                if r in ["GPU_TRUCK", "GPU_OPERATOR"]:
+                    log("debug", t_sec, f"[GPU DEBUG] Checking role={r}, tagged_ids={tagged_ids}, roi_key={roi_key}, roi={roi}")
+
+                if not tagged_ids:
+                    if r in ["GPU_TRUCK", "GPU_OPERATOR"]:
+                        log("debug", t_sec, f"[GPU DEBUG] No tagged IDs found for role {r}")
+                    continue
+
+                # Ensure track_id column is int for comparison
+                if "track_id" not in dets_df.columns:
+                    if r in ["GPU_TRUCK", "GPU_OPERATOR"]:
+                        log("debug", t_sec, f"[GPU DEBUG] No track_id column in dets_df")
+                    continue
+
+                sub = dets_df[dets_df["track_id"].isin(tagged_ids)].copy()
+
+                # DEBUG: Log current detections
+                if r in ["GPU_TRUCK", "GPU_OPERATOR"]:
+                    all_track_ids = dets_df["track_id"].tolist() if "track_id" in dets_df.columns else []
+                    log("debug", t_sec, f"[GPU DEBUG] All track_ids in frame: {all_track_ids}")
+                    log("debug", t_sec, f"[GPU DEBUG] Matched detections: {len(sub)} (looking for track_ids={tagged_ids})")
+
+                if sub.empty:
+                    if r in ["GPU_TRUCK", "GPU_OPERATOR"]:
+                        log("debug", t_sec, f"[GPU DEBUG] No detections found with track_ids={tagged_ids} in current frame")
+                    continue
+
+                for _, rr in sub.iterrows():
+                    bbox = tuple(rr["bbox_xyxy"])
+                    in_roi_result = _in_roi(bbox, roi)
+
+                    # DEBUG: Log ROI check
+                    if r in ["GPU_TRUCK", "GPU_OPERATOR"]:
+                        log("debug", t_sec, f"[GPU DEBUG] Detection track_id={rr['track_id']}, bbox={bbox}, in_roi={in_roi_result}")
+
+                    if in_roi_result:
+                        return True
+
         return False
 
     # Evaluate each task state
@@ -173,21 +221,35 @@ def compute_alerts_df(
     alerts: Dict[str, AlertItem],
     log: Callable[[str, float, str], None],
 ) -> pd.DataFrame:
-    # Safety: engine zone not clear
-    # ACTIVE = person IS in engine zone → DANGER!
-    h = task_hist.get("safety_engine_clear", {})
-    if h.get("status") == "ACTIVE":
+    # Safety: Right Engine Pylon - ENGINE_SAFETY_CREW placing pylon is GOOD!
+    h_right = task_hist.get("safety_engine_right_clear", {})
+    if h_right.get("status") == "ACTIVE":
         _upsert_alert(
             alerts,
-            alert_id="engine_zone_not_clear",
-            severity="CRITICAL",
-            rule_id="safety_engine_clear",
-            message="DANGER: Person detected in Engine ROI! Engine zone NOT clear.",
+            alert_id="engine_right_pylon_placed",
+            severity="INFO",
+            rule_id="safety_engine_right_clear",
+            message="✓ Right engine safety pylon placed by crew.",
             now_t=now_t,
             log=log,
         )
     else:
-        _close_alert(alerts, alert_id="engine_zone_not_clear", now_t=now_t)
+        _close_alert(alerts, alert_id="engine_right_pylon_placed", now_t=now_t)
+
+    # Safety: Left Engine Pylon - ENGINE_SAFETY_CREW placing pylon is GOOD!
+    h_left = task_hist.get("safety_engine_left_clear", {})
+    if h_left.get("status") == "ACTIVE":
+        _upsert_alert(
+            alerts,
+            alert_id="engine_left_pylon_placed",
+            severity="INFO",
+            rule_id="safety_engine_left_clear",
+            message="✓ Left engine safety pylon placed by crew.",
+            now_t=now_t,
+            log=log,
+        )
+    else:
+        _close_alert(alerts, alert_id="engine_left_pylon_placed", now_t=now_t)
 
     # Safety: pushback area not clear
     # ACTIVE = person IS in pushback zone → WARNING!

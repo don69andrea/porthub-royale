@@ -26,17 +26,18 @@ class SequenceState:
 
 def default_sequence() -> List[StepSpec]:
     # keys must match TASKS keys from rules_engine.py:
-    # gpu, fueling, baggage, passenger_*, pushback
+    # wheel_chocks, gpu, fueling, baggage_front, baggage_rear, passenger_*, pushback
     # safety_* are handled via alerts, not sequence order
     return [
         StepSpec(key="fingerdock_docked", title="Fingerdock Docked"),
+        StepSpec(key="wheel_chocks", title="Wheel Chocks Placed", deadline_sec=60),  # Early safety task
         StepSpec(key="passenger_unboarding", title="Passenger Unboarding", deadline_sec=180, requires_done=["fingerdock_docked"]),
         StepSpec(key="gpu", title="GPU connected", deadline_sec=120),
         StepSpec(key="fueling", title="Fueling", requires_done=["gpu"]),
-        StepSpec(key="baggage_belt_arriving", title="Baggage Belt Arriving"),
-        StepSpec(key="baggage", title="Baggage unloading/loading", requires_done=["baggage_belt_arriving"]),
+        StepSpec(key="baggage_front", title="Baggage Front Door"),
+        StepSpec(key="baggage_rear", title="Baggage Rear Door"),
         StepSpec(key="passenger_boarding", title="Passenger Boarding", requires_done=["passenger_unboarding"]),
-        StepSpec(key="pushback", title="Pushback", requires_done=["fueling", "baggage", "passenger_boarding", "fingerdock_undocked"]),
+        StepSpec(key="pushback", title="Pushback", requires_done=["fueling", "baggage_front", "baggage_rear", "passenger_boarding", "fingerdock_undocked"]),
     ]
 
 
